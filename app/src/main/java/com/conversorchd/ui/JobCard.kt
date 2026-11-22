@@ -62,7 +62,7 @@ class JobCard(private val ctx: Context, private val actions: Actions) {
 
     fun bind(job: Job, index: Int, count: Int) {
         val ext = Storage.extension(job.displayName).uppercase().ifEmpty { "IMG" }
-        Ui.setBadge(format, ext, Ui.ON_TONAL)
+        Ui.setBadge(format, ext, Ui.SUBTLE)
         title.text = job.displayName
 
         val kind = when (job.kind) {
@@ -100,13 +100,7 @@ class JobCard(private val ctx: Context, private val actions: Actions) {
             else -> null
         }
         setText(message, msg)
-        message.setTextColor(
-            when (job.state) {
-                JobState.CANCELLED -> Ui.WARN
-                JobState.DONE -> Ui.SUCCESS
-                else -> Ui.ERROR
-            },
-        )
+        message.setTextColor(if (job.state == JobState.CANCELLED) Ui.SUBTLE else Ui.FG)
 
         updateButtons(job, index, count)
     }
@@ -129,13 +123,13 @@ class JobCard(private val ctx: Context, private val actions: Actions) {
 
     private fun statusOf(job: Job): Pair<String, Int> = when (job.state) {
         JobState.ANALYZING -> ctx.getString(R.string.state_analyzing) to Ui.ON_SURFACE_VAR
-        JobState.READY -> ctx.getString(R.string.state_ready) to Ui.PRIMARY
-        JobState.BLOCKED -> ctx.getString(R.string.state_blocked) to Ui.ERROR
+        JobState.READY -> ctx.getString(R.string.state_ready) to Ui.SUBTLE
+        JobState.BLOCKED -> "✕ " + ctx.getString(R.string.state_blocked) to Ui.FG
         JobState.RUNNING -> ctx.getString(R.string.state_running, Format.percent(job.fraction)) to Ui.PRIMARY
         JobState.VERIFYING -> ctx.getString(R.string.state_verifying, Format.percent(job.fraction)) to Ui.PRIMARY
-        JobState.DONE -> ctx.getString(R.string.state_done_short) to Ui.SUCCESS
-        JobState.FAILED -> ctx.getString(R.string.state_failed) to Ui.ERROR
-        JobState.CANCELLED -> ctx.getString(R.string.state_cancelled) to Ui.WARN
+        JobState.DONE -> "✓ " + ctx.getString(R.string.state_done_short) to Ui.FG
+        JobState.FAILED -> "✕ " + ctx.getString(R.string.state_failed) to Ui.FG
+        JobState.CANCELLED -> "– " + ctx.getString(R.string.state_cancelled) to Ui.SUBTLE
     }
 
     private fun updateButtons(job: Job, index: Int, count: Int) {

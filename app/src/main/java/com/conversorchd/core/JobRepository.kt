@@ -73,10 +73,6 @@ object JobRepository {
         changed()
     }
 
-    fun indexOf(id: Long): Int = synchronized(lock) { jobs.indexOfFirst { it.id == id } }
-
-    fun size(): Int = synchronized(lock) { jobs.size }
-
     fun current(): Job? = synchronized(lock) { jobs.firstOrNull { it.isActive } }
 
     fun nextReady(): Job? = synchronized(lock) { jobs.firstOrNull { it.state == JobState.READY } }

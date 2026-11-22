@@ -132,8 +132,6 @@ class Job(
     @Volatile var profile: Profile? = null
     @Volatile var speedBps: Double = 0.0
     @Volatile var startedAt: Long = 0
-    @Volatile var stageStartedAt: Long = 0
-    @Volatile var finishedAt: Long = 0
 
     // resultado
     @Volatile var outputName: String? = null

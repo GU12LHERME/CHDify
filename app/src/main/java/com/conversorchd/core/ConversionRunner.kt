@@ -25,7 +25,6 @@ class ConversionRunner(private val ctx: Context, private val prefs: Prefs, priva
         val mode = job.mode ?: DiscMode.DVD
         val tree = prefs.destinationTree
         job.startedAt = SystemClock.elapsedRealtime()
-        job.stageStartedAt = job.startedAt
         job.fraction = 0.0
         job.bytesDone = 0
         job.speedBps = 0.0
@@ -108,7 +107,6 @@ class ConversionRunner(private val ctx: Context, private val prefs: Prefs, priva
                 job.fraction = 0.0
                 job.bytesDone = 0
                 job.speedBps = 0.0
-                job.stageStartedAt = SystemClock.elapsedRealtime()
                 onUpdate(job)
                 val v = cr.openFileDescriptor(uri, "r").use { pfd ->
                     pfd ?: throw IllegalStateException(ctx.getString(R.string.err_open))
@@ -168,7 +166,6 @@ class ConversionRunner(private val ctx: Context, private val prefs: Prefs, priva
     private fun finish(job: Job, state: JobState, message: String?) {
         job.state = state
         job.message = message
-        job.finishedAt = SystemClock.elapsedRealtime()
         job.log("Fim: ${state.name}${if (message != null) " — $message" else ""}")
         onUpdate(job)
     }
@@ -194,7 +191,6 @@ class ConversionRunner(private val ctx: Context, private val prefs: Prefs, priva
             val now = SystemClock.elapsedRealtime()
             if (stage != job.stage) {
                 job.stage = stage
-                job.stageStartedAt = now
                 job.speedBps = 0.0
                 lastBytes = 0
                 lastTime = now

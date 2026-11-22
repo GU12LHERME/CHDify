@@ -95,27 +95,6 @@ object Storage {
     fun hasTreePermission(context: Context, treeUri: Uri): Boolean =
         context.contentResolver.persistedUriPermissions.any { it.uri == treeUri && it.isWritePermission }
 
-    /**
-     * Cria um documento novo na pasta de destino sem sobrescrever arquivos
-     * existentes ("Jogo.chd", "Jogo (2).chd", ...).
-     */
-    @Throws(FileNotFoundException::class)
-    fun createUniqueDocument(cr: ContentResolver, treeUri: Uri, baseName: String, extension: String): Pair<Uri, String> {
-        val existing = listTree(cr, treeUri).map { it.name.lowercase() }.toSet()
-        var name = "$baseName.$extension"
-        var n = 2
-        while (name.lowercase() in existing) {
-            name = "$baseName ($n).$extension"
-            n++
-        }
-        val parent = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
-        val uri = DocumentsContract.createDocument(cr, parent, "application/octet-stream", name)
-            ?: throw FileNotFoundException("não foi possível criar $name")
-        // alguns provedores ajustam o nome; usa o nome real
-        val real = describe(cr, uri)?.name ?: name
-        return uri to real
-    }
-
     /** Resultado de [createPartialDocument]. */
     data class Output(val uri: Uri, val finalName: String, val currentName: String, val partial: Boolean)
 

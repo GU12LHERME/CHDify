@@ -17,4 +17,7 @@ Todos os componentes abaixo estão em `app/src/main/cpp/mame/`, copiados do repo
 O arquivo `app/src/main/cpp/compat/SDL2/SDL.h` é um substituto mínimo, escrito para este projeto,
 que fornece funções inertes de área de transferência exigidas por `osdlib_unix.cpp`. O app não usa SDL.
 
+O texto "CHD" do ícone foi convertido em vetor a partir da fonte DejaVu Sans Bold (licença Bitstream
+Vera / domínio público para as alterações do DejaVu). A fonte em si não é distribuída com o app.
+
 MAME é marca registrada de Gregory Ember.

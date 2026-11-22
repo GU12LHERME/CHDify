@@ -29,10 +29,6 @@
     <!-- progresso -->
     <string name="stage_compressing">Comprimindo · %1$s</string>
     <string name="stage_verifying">Verificando integridade · %1$s</string>
-    <string name="stats_line">Velocidade %1$s\nDecorrido  %2$s\nRestante   %3$s</string>
-    <string name="sizes_input">Tamanho original: %1$s</string>
-    <string name="sizes_estimate">Original %1$s → CHD estimado %2$s</string>
-    <string name="sizes_total">Total convertido: %1$s → %2$s</string>
     <string name="idle_title">Nenhuma conversão em andamento</string>
     <string name="idle_starting">Iniciando…</string>
     <string name="idle_hint">Adicione arquivos ISO, CUE ou GDI e toque em Iniciar.</string>
@@ -51,7 +47,6 @@
     <string name="state_blocked">Não pode ser convertido</string>
     <string name="state_running">Convertendo · %1$s</string>
     <string name="state_verifying">Verificando · %1$s</string>
-    <string name="state_done">Concluído: %1$s · %2$s (%3$s do original)</string>
     <string name="state_verified">verificado ✓</string>
     <string name="state_failed">Falhou</string>
     <string name="state_cancelled">Cancelado</string>

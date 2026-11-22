@@ -7,6 +7,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Insets
 import android.graphics.Typeface
@@ -40,7 +41,6 @@ import com.conversorchd.core.Job
 import com.conversorchd.core.JobRepository
 import com.conversorchd.core.JobState
 import com.conversorchd.core.Prefs
-import com.conversorchd.core.SourceKind
 import com.conversorchd.core.SourceResolver
 import com.conversorchd.core.Storage
 import com.conversorchd.service.ConversionService
@@ -202,8 +202,10 @@ class MainActivity : Activity(), JobCard.Actions {
             textSize = 14f
             isChecked = prefs.verifyAfter
             minHeight = Ui.dp(this@MainActivity, 44)
-            background = Ui.stateBackground(this@MainActivity, Ui.SURFACE, 0, 10, Ui.withAlpha(Ui.PRIMARY, 0.2f))
+            background = Ui.stateBackground(this@MainActivity, Ui.BG, 0, Ui.RADIUS, Ui.withAlpha(Ui.SUBTLE, 0.35f))
             setPadding(Ui.dp(this@MainActivity, 4), 0, Ui.dp(this@MainActivity, 4), 0)
+            thumbTintList = ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked), IntArray(0)), intArrayOf(Ui.FG, Ui.SUBTLE))
+            trackTintList = ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked), IntArray(0)), intArrayOf(Ui.SUBTLE, Ui.BORDER))
             setOnCheckedChangeListener { _, checked -> prefs.verifyAfter = checked }
         }
         col.addView(verifySwitch, Ui.lp())
@@ -439,7 +441,7 @@ class MainActivity : Activity(), JobCard.Actions {
         val saved = input - output
         val pct = if (input > 0) Format.percent(saved.toDouble() / input) else "—"
         statSaved.text = (if (estimate) "≈ " else "") + "${Format.bytes(saved)} ($pct)"
-        statSaved.setTextColor(if (saved >= 0) Ui.SUCCESS else Ui.WARN)
+        statSaved.setTextColor(if (saved >= 0) Ui.FG else Ui.WARN)
     }
 
     // ================================================================== ações

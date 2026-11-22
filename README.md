@@ -33,7 +33,9 @@ Funciona offline, sem root, sem Termux e sem aplicativos adicionais.
   for encerrado no meio, o arquivo incompleto é apagado na próxima abertura.
 - O arquivo original é aberto somente para leitura; nada no destino é sobrescrito (`Jogo (2).chd`, ...).
 - Log detalhado por item (mensagens do chdman, trilhas, codecs, SHA-1), com botão para copiar.
-- Interface em português, fundo preto puro (OLED), navegação por toque, D-pad e gamepad.
+- Interface em português, preto e branco para telas OLED (fundo #000000, texto branco, cinza #8C8C8C para
+  informações secundárias, linhas #1A1A1A e moldura branca no item focado), com navegação por toque, D-pad e gamepad.
+- Ícone: CD branco com "CHD" (vetorial, com versão monocromática para os ícones temáticos do Android 13+).
 
 ### Controles físicos
 
@@ -92,7 +94,7 @@ ou dados em modo 2. Por isso o app **não presume** que qualquer ISO pode virar 
 ```
 app/src/main/
 ├── cpp/
-│   ├── mame/                  código do MAME copiado por tools/vendor_mame.sh (BSD-3-Clause)
+│   ├── mame/                  só os arquivos do MAME usados pelo build (lista em tools/mame_files.txt), BSD-3-Clause
 │   ├── engine/
 │   │   ├── chd_engine.cpp     inclui chdman.cpp inalterado; laço de compressão com progresso,
 │   │   │                      cancelamento e E/S por descritor; verify; info
@@ -182,7 +184,7 @@ e `CONVERSOR_KEY_PASSWORD`.
 
 ```bash
 git clone --depth 1 https://github.com/mamedev/mame.git /tmp/mame
-tools/vendor_mame.sh /tmp/mame
+tools/vendor_mame.sh /tmp/mame      # copia os arquivos de tools/mame_files.txt
 tests/native/run_tests.sh <build-host>
 ```
 
