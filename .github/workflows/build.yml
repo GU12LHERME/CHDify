@@ -46,6 +46,35 @@ jobs:
           path: "*.log"
 
   # ---------------------------------------------------------------------------
+  # Benchmark dos perfis (imagens sintéticas; runner x86_64)
+  # ---------------------------------------------------------------------------
+  benchmark:
+    name: Benchmark dos perfis
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Dependências
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q ninja-build cmake ffmpeg
+          pip install --break-system-packages pycdlib
+      - name: Compilar
+        run: |
+          cmake -S app/src/main/cpp -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+      - name: Executar
+        run: |
+          nproc | tee benchmark.txt
+          python3 tests/bench/make_bench_images.py /tmp/bench build/mkraw | tee -a benchmark.txt
+          tests/bench/run_bench.sh build /tmp/bench benchmark.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark
+          path: |
+            benchmark.txt
+            benchmark.jsonl
+
+  # ---------------------------------------------------------------------------
   # Mesmos testes com o motor compilado para ARM64 e executado via QEMU
   # ---------------------------------------------------------------------------
   native-tests-arm64:

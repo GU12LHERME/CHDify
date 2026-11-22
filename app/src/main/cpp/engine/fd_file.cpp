@@ -23,6 +23,10 @@ std::unique_ptr<FdFile> FdFile::from_fd(int fd, bool writable, std::error_condit
 		err = std::error_condition(errno, std::generic_category());
 		return nullptr;
 	}
+	// Leitura sequencial: pede readahead agressivo ao kernel (inclusive FUSE do
+	// armazenamento compartilhado). É só uma dica; erros são ignorados.
+	if (!writable)
+		(void)::posix_fadvise(dupfd, 0, 0, POSIX_FADV_SEQUENTIAL);
 	return std::unique_ptr<FdFile>(new FdFile(dupfd, writable));
 }
 

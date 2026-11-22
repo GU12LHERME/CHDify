@@ -8,7 +8,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 /**
  * Estado da fila de conversão, compartilhado entre a interface e o serviço
  * (mesmo processo). Notificações de mudança são agrupadas e entregues na
- * thread principal no máximo a cada ~120 ms.
+ * thread principal no máximo a cada ~250 ms (4 quadros/s bastam para o
+ * progresso e evitam gastar CPU redesenhando a tela durante a conversão).
  */
 object JobRepository {
     private val lock = Any()
@@ -58,6 +59,24 @@ object JobRepository {
         return removed
     }
 
+    /** Move um item não ativo uma posição para cima (-1) ou para baixo (+1). */
+    fun move(id: Long, delta: Int) {
+        synchronized(lock) {
+            val i = jobs.indexOfFirst { it.id == id }
+            val j = i + delta
+            if (i < 0 || j < 0 || j >= jobs.size) return
+            if (jobs[i].isActive || jobs[j].isActive) return
+            val tmp = jobs[i]
+            jobs[i] = jobs[j]
+            jobs[j] = tmp
+        }
+        changed()
+    }
+
+    fun indexOf(id: Long): Int = synchronized(lock) { jobs.indexOfFirst { it.id == id } }
+
+    fun size(): Int = synchronized(lock) { jobs.size }
+
     fun current(): Job? = synchronized(lock) { jobs.firstOrNull { it.isActive } }
 
     fun nextReady(): Job? = synchronized(lock) { jobs.firstOrNull { it.state == JobState.READY } }
@@ -88,7 +107,7 @@ object JobRepository {
             main.postDelayed({
                 notifyPending.set(false)
                 listeners.forEach { it() }
-            }, 120)
+            }, 250)
         }
     }
 }

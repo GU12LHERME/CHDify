@@ -116,6 +116,54 @@ object Storage {
         return uri to real
     }
 
+    /** Resultado de [createPartialDocument]. */
+    data class Output(val uri: Uri, val finalName: String, val currentName: String, val partial: Boolean)
+
+    /**
+     * Cria o arquivo de saída com o nome temporário "<nome>.chd.parcial". Só
+     * depois da conversão (e da verificação) ele é renomeado para "<nome>.chd",
+     * de modo que um arquivo com extensão .chd nunca fica incompleto no destino.
+     * Se o provedor não suportar renomear, cria diretamente com o nome final.
+     */
+    @Throws(FileNotFoundException::class)
+    fun createPartialDocument(cr: ContentResolver, treeUri: Uri, baseName: String, extension: String): Output {
+        val existing = listTree(cr, treeUri).map { it.name.lowercase() }.toSet()
+        var name = "$baseName.$extension"
+        var n = 2
+        while (name.lowercase() in existing || "$name$PARTIAL_SUFFIX".lowercase() in existing) {
+            name = "$baseName ($n).$extension"
+            n++
+        }
+        val parent = DocumentsContract.buildDocumentUriUsingTree(treeUri, DocumentsContract.getTreeDocumentId(treeUri))
+        val temp = DocumentsContract.createDocument(cr, parent, "application/octet-stream", name + PARTIAL_SUFFIX)
+            ?: throw FileNotFoundException("não foi possível criar $name")
+        if (supportsRename(cr, temp)) {
+            return Output(temp, name, describe(cr, temp)?.name ?: name + PARTIAL_SUFFIX, true)
+        }
+        deleteDocument(cr, temp)
+        val direct = DocumentsContract.createDocument(cr, parent, "application/octet-stream", name)
+            ?: throw FileNotFoundException("não foi possível criar $name")
+        val real = describe(cr, direct)?.name ?: name
+        return Output(direct, real, real, false)
+    }
+
+    private fun supportsRename(cr: ContentResolver, uri: Uri): Boolean = try {
+        cr.query(uri, arrayOf(DocumentsContract.Document.COLUMN_FLAGS), null, null, null)?.use { c ->
+            c.moveToFirst() && (c.getInt(0) and DocumentsContract.Document.FLAG_SUPPORTS_RENAME) != 0
+        } ?: false
+    } catch (e: Exception) {
+        false
+    }
+
+    /** Renomeia; devolve o novo Uri (alguns provedores trocam o Uri) ou null em caso de falha. */
+    fun rename(cr: ContentResolver, uri: Uri, name: String): Uri? = try {
+        DocumentsContract.renameDocument(cr, uri, name)
+    } catch (e: Exception) {
+        null
+    }
+
+    const val PARTIAL_SUFFIX = ".parcial"
+
     fun deleteDocument(cr: ContentResolver, uri: Uri): Boolean = try {
         DocumentsContract.deleteDocument(cr, uri)
     } catch (e: Exception) {

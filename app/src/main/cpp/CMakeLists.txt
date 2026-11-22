@@ -127,4 +127,8 @@ else()
 
   add_executable(chdengine_cli host/engine_cli.cpp)
   target_link_libraries(chdengine_cli PRIVATE chdengine)
+
+  # gera trilhas MODE1/2352 com EDC/ECC válidos para benchmarks
+  add_executable(mkraw host/mkraw.cpp)
+  target_link_libraries(mkraw PRIVATE mame_chd)
 endif()

@@ -41,6 +41,7 @@ struct Progress
 	double ratio;         // tamanho comprimido / tamanho lido (0..1+)
 	std::uint64_t done;   // bytes lógicos processados
 	std::uint64_t total;  // bytes lógicos totais
+	std::uint64_t written; // bytes já gravados no CHD (0 na verificação)
 };
 
 using ProgressFn = std::function<void(Progress const &)>;
@@ -48,7 +49,13 @@ using LogFn = std::function<void(std::string const &)>;
 
 struct Options
 {
-	int threads = 0;                        // 0 = automático (todos os núcleos)
+	// Threads de compressão. 0 = automático (todos os núcleos). O valor é
+	// repassado como "-np" do chdman (osd_num_processors); ver configure_threads().
+	int threads = 0;
+	// Tamanho do hunk em bytes (0 = padrão do chdman: 4096 em DVD, 19584 em CD).
+	unsigned hunk_bytes = 0;
+	// Codecs ("lzma,zlib,huff,flac" / "cdlz,cdzl,cdfl"...). Vazio = padrão do chdman.
+	std::string codecs;
 	std::atomic<bool> *cancel = nullptr;    // sinalizador de cancelamento
 	ProgressFn progress;                    // chamado periodicamente (limitado internamente)
 	LogFn log;                              // mensagens detalhadas

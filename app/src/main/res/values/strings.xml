@@ -123,4 +123,33 @@
     <string name="notif_progress_line">%1$s · %2$s · resta %3$s</string>
     <string name="notif_done_title">Fila concluída</string>
     <string name="notif_done_text">%1$d concluído(s), %2$d com erro.</string>
+    <!-- perfis -->
+    <string name="profile_label">Perfil de compactação</string>
+    <string name="profile_fast">Rápido</string>
+    <string name="profile_balanced">Equilibrado</string>
+    <string name="profile_max">Máximo</string>
+    <string name="profile_fast_hint">Prioriza a velocidade (codecs zlib/FLAC). Em geral várias vezes mais rápido, com arquivo um pouco maior.</string>
+    <string name="profile_balanced_hint">Configuração padrão do chdman: resultado idêntico ao chdman oficial e máxima compatibilidade.</string>
+    <string name="profile_max_hint">Prioriza o menor arquivo (hunks maiores com LZMA). Mais lento; lido por emuladores atuais baseados em libchdr. Se algum leitor antigo recusar, use Equilibrado.</string>
+    <string name="profile_params">DVD: %1$s · CD: %2$s</string>
+    <string name="advanced_show">Avançado ▸</string>
+    <string name="advanced_hide">Avançado ▾</string>
+    <string name="advanced_note">Hunks maiores reduzem o tamanho e aumentam o uso de RAM e o custo de cada leitura aleatória no emulador. Todos os valores são aceitos pelo chdman oficial. As threads não mudam durante uma conversão.</string>
+    <string name="hunk_dvd">Hunk (DVD): %1$s</string>
+    <string name="hunk_cd">Hunk (CD): %1$s</string>
+    <string name="hunk_profile">do perfil</string>
+    <string name="hunk_frames">%1$d quadros</string>
+    <string name="threads_auto_clusters">Núcleos da CPU: automático (%1$d · %2$s)</string>
+
+    <!-- painel -->
+    <string name="stat_speed">Velocidade</string>
+    <string name="stat_elapsed">Decorrido</string>
+    <string name="stat_remaining">Restante</string>
+    <string name="stat_original">Original</string>
+    <string name="stat_compressed">Comprimido</string>
+    <string name="stat_saved">Economia</string>
+    <string name="state_done_short">Concluído</string>
+    <string name="done_line">%1$s · %2$s · economia de %3$s (%4$s)</string>
+    <string name="action_move_up">Mover para cima</string>
+    <string name="action_move_down">Mover para baixo</string>
 </resources>

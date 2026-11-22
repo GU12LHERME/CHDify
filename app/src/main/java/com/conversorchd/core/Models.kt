@@ -127,6 +127,9 @@ class Job(
     @Volatile var ratio: Double = 1.0
     @Volatile var bytesDone: Long = 0
     @Volatile var bytesTotal: Long = 0
+    /** Bytes já gravados no CHD durante a compressão (tamanho comprimido real até o momento). */
+    @Volatile var bytesWritten: Long = 0
+    @Volatile var profile: Profile? = null
     @Volatile var speedBps: Double = 0.0
     @Volatile var startedAt: Long = 0
     @Volatile var stageStartedAt: Long = 0

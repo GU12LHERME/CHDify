@@ -3,6 +3,7 @@ package com.conversorchd.ui
 import android.content.Context
 import android.view.View
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import com.conversorchd.R
 import com.conversorchd.core.DiscMode
@@ -10,11 +11,12 @@ import com.conversorchd.core.Format
 import com.conversorchd.core.Job
 import com.conversorchd.core.JobState
 import com.conversorchd.core.SourceKind
+import com.conversorchd.core.Storage
 
 /**
- * Cartão de um item da fila. Os textos são atualizados no lugar (sem recriar
- * views) para não roubar o foco do D-pad durante a conversão; a linha de
- * botões só é refeita quando o conjunto de ações muda.
+ * Cartão compacto de um item da fila. Os textos e a barra são atualizados no
+ * lugar (sem recriar views) para não roubar o foco do D-pad durante a
+ * conversão; a linha de botões só é refeita quando o conjunto de ações muda.
  */
 class JobCard(private val ctx: Context, private val actions: Actions) {
 
@@ -23,36 +25,46 @@ class JobCard(private val ctx: Context, private val actions: Actions) {
         fun remove(job: Job)
         fun retry(job: Job)
         fun showLog(job: Job)
+        fun move(job: Job, delta: Int)
     }
 
     val view: LinearLayout = Ui.card(ctx)
-    private val title = Ui.singleLine(Ui.text(ctx, "", 16f, Ui.ON_SURFACE, bold = true))
-    private val meta = Ui.text(ctx, "", 13f, Ui.ON_SURFACE_VAR)
-    private val summary = Ui.text(ctx, "", 13f, Ui.ON_SURFACE_VAR)
-    private val warnings = Ui.text(ctx, "", 13f, Ui.WARN)
-    private val status = Ui.text(ctx, "", 14f, Ui.PRIMARY, bold = true)
-    private val message = Ui.text(ctx, "", 13f, Ui.ERROR)
-    private val buttons = Ui.row(ctx, 8)
+    private val format = Ui.badge(ctx)
+    private val title = Ui.singleLine(Ui.text(ctx, "", 14f, Ui.ON_SURFACE, bold = true))
+    private val state = Ui.badge(ctx)
+    private val meta = Ui.text(ctx, "", 12f, Ui.ON_SURFACE_VAR)
+    private val summary = Ui.text(ctx, "", 12f, Ui.ON_SURFACE_VAR)
+    private val warnings = Ui.text(ctx, "", 12f, Ui.WARN)
+    private val bar: ProgressBar = Ui.progressBar(ctx)
+    private val message = Ui.text(ctx, "", 12f, Ui.ERROR)
+    private val buttons = Ui.row(ctx, 6)
     private var buttonsSig = ""
 
     init {
-        val col = Ui.column(ctx, 6)
-        col.addView(title)
+        val col = Ui.column(ctx, 4)
+        col.addView(Ui.row(ctx, 8).apply {
+            addView(format)
+            addView(title, Ui.weighted())
+            addView(state)
+        }, Ui.lp())
         col.addView(meta)
         col.addView(summary)
         col.addView(warnings)
-        col.addView(status)
+        col.addView(bar, Ui.lp(h = Ui.dp(ctx, 4)).apply { topMargin = Ui.dp(ctx, 2) })
         col.addView(message)
         view.addView(col, Ui.lp())
         val scroll = android.widget.HorizontalScrollView(ctx).apply {
             isHorizontalScrollBarEnabled = false
             addView(buttons)
         }
-        view.addView(scroll, Ui.lp().apply { topMargin = Ui.dp(ctx, 10) })
+        view.addView(scroll, Ui.lp().apply { topMargin = Ui.dp(ctx, 8) })
     }
 
-    fun bind(job: Job) {
+    fun bind(job: Job, index: Int, count: Int) {
+        val ext = Storage.extension(job.displayName).uppercase().ifEmpty { "IMG" }
+        Ui.setBadge(format, ext, Ui.ON_TONAL)
         title.text = job.displayName
+
         val kind = when (job.kind) {
             SourceKind.IMAGE -> ctx.getString(R.string.kind_image)
             SourceKind.CUE -> ctx.getString(R.string.kind_cue, job.tracks.size)
@@ -66,18 +78,44 @@ class JobCard(private val ctx: Context, private val actions: Actions) {
         setText(warnings, a?.warnings?.takeIf { it.isNotEmpty() }?.joinToString("\n") { "⚠ $it" })
 
         val (statusText, statusColor) = statusOf(job)
-        status.text = statusText
-        status.setTextColor(statusColor)
+        Ui.setBadge(state, statusText, statusColor)
 
-        val msg = when {
-            job.state == JobState.BLOCKED -> a?.error
-            job.state == JobState.FAILED || job.state == JobState.CANCELLED -> job.message
+        // barra individual: visível durante a conversão e ao final
+        when {
+            job.isActive -> {
+                bar.visibility = View.VISIBLE
+                bar.progress = (job.fraction * 1000).toInt()
+            }
+            job.state == JobState.DONE -> {
+                bar.visibility = View.VISIBLE
+                bar.progress = 1000
+            }
+            else -> bar.visibility = View.GONE
+        }
+
+        val msg = when (job.state) {
+            JobState.BLOCKED -> a?.error
+            JobState.FAILED, JobState.CANCELLED -> job.message
+            JobState.DONE -> doneLine(job)
             else -> null
         }
         setText(message, msg)
-        message.setTextColor(if (job.state == JobState.CANCELLED) Ui.WARN else Ui.ERROR)
+        message.setTextColor(
+            when (job.state) {
+                JobState.CANCELLED -> Ui.WARN
+                JobState.DONE -> Ui.SUCCESS
+                else -> Ui.ERROR
+            },
+        )
 
-        updateButtons(job)
+        updateButtons(job, index, count)
+    }
+
+    private fun doneLine(job: Job): String {
+        val saved = job.inputBytes - job.outputBytes
+        val pct = if (job.inputBytes > 0) Format.percent(saved.toDouble() / job.inputBytes) else "—"
+        val base = ctx.getString(R.string.done_line, job.outputName ?: "", Format.bytes(job.outputBytes), Format.bytes(saved), pct)
+        return if (job.verified) base + " · " + ctx.getString(R.string.state_verified) else base
     }
 
     private fun setText(tv: TextView, s: String?) {
@@ -95,41 +133,47 @@ class JobCard(private val ctx: Context, private val actions: Actions) {
         JobState.BLOCKED -> ctx.getString(R.string.state_blocked) to Ui.ERROR
         JobState.RUNNING -> ctx.getString(R.string.state_running, Format.percent(job.fraction)) to Ui.PRIMARY
         JobState.VERIFYING -> ctx.getString(R.string.state_verifying, Format.percent(job.fraction)) to Ui.PRIMARY
-        JobState.DONE -> {
-            val pct = if (job.inputBytes > 0) Format.percent(job.outputBytes.toDouble() / job.inputBytes) else "—"
-            val base = ctx.getString(R.string.state_done, job.outputName ?: "", Format.bytes(job.outputBytes), pct)
-            (if (job.verified) base + " · " + ctx.getString(R.string.state_verified) else base) to Ui.SUCCESS
-        }
+        JobState.DONE -> ctx.getString(R.string.state_done_short) to Ui.SUCCESS
         JobState.FAILED -> ctx.getString(R.string.state_failed) to Ui.ERROR
         JobState.CANCELLED -> ctx.getString(R.string.state_cancelled) to Ui.WARN
     }
 
-    private fun updateButtons(job: Job) {
+    private fun updateButtons(job: Job, index: Int, count: Int) {
         val allowed = job.analysis?.allowedModes ?: emptySet()
-        val canEditMode = allowed.size > 1 && (job.state == JobState.READY || job.state == JobState.FAILED || job.state == JobState.CANCELLED)
+        val editable = job.state == JobState.READY || job.state == JobState.FAILED || job.state == JobState.CANCELLED
+        val canEditMode = allowed.size > 1 && editable
         val canRemove = !job.isActive
         val canRetry = job.state == JobState.FAILED || job.state == JobState.CANCELLED
-        val sig = "$canEditMode|${job.mode}|$canRemove|$canRetry|${job.state}"
+        val canUp = !job.isActive && index > 0
+        val canDown = !job.isActive && index < count - 1
+        val sig = "$canEditMode|${job.mode}|$canRemove|$canRetry|$canUp|$canDown|${job.state}"
         if (sig == buttonsSig) return
         val hadFocus = buttons.findFocus()?.tag as? String
         buttonsSig = sig
         buttons.removeAllViews()
+
+        fun add(label: String, style: Ui.Style, tag: String, desc: String? = null, onClick: () -> Unit) {
+            buttons.addView(Ui.smallButton(ctx, label, style) { onClick() }.apply {
+                this.tag = tag
+                if (desc != null) contentDescription = desc
+            })
+        }
 
         if (canEditMode) {
             for (m in listOf(DiscMode.DVD, DiscMode.CD)) {
                 if (m !in allowed) continue
                 val selected = job.mode == m
                 val label = ctx.getString(if (m == DiscMode.CD) R.string.mode_cd else R.string.mode_dvd)
-                val b = Ui.smallButton(ctx, if (selected) "✓ $label" else label, if (selected) Ui.Style.FILLED else Ui.Style.OUTLINED) {
+                add(if (selected) "✓ $label" else label, if (selected) Ui.Style.FILLED else Ui.Style.OUTLINED, "mode-${m.name}") {
                     actions.setMode(job, m)
                 }
-                b.tag = "mode-${m.name}"
-                buttons.addView(b)
             }
         }
-        if (canRetry) buttons.addView(Ui.smallButton(ctx, ctx.getString(R.string.action_retry), Ui.Style.TONAL) { actions.retry(job) }.apply { tag = "retry" })
-        buttons.addView(Ui.smallButton(ctx, ctx.getString(R.string.action_log), Ui.Style.OUTLINED) { actions.showLog(job) }.apply { tag = "log" })
-        if (canRemove) buttons.addView(Ui.smallButton(ctx, ctx.getString(R.string.action_remove), Ui.Style.TEXT) { actions.remove(job) }.apply { tag = "remove" })
+        if (canRetry) add(ctx.getString(R.string.action_retry), Ui.Style.TONAL, "retry") { actions.retry(job) }
+        if (canUp) add("↑", Ui.Style.OUTLINED, "up", ctx.getString(R.string.action_move_up)) { actions.move(job, -1) }
+        if (canDown) add("↓", Ui.Style.OUTLINED, "down", ctx.getString(R.string.action_move_down)) { actions.move(job, 1) }
+        add(ctx.getString(R.string.action_log), Ui.Style.OUTLINED, "log") { actions.showLog(job) }
+        if (canRemove) add(ctx.getString(R.string.action_remove), Ui.Style.TEXT, "remove") { actions.remove(job) }
 
         if (hadFocus != null) {
             (0 until buttons.childCount).map { buttons.getChildAt(it) }.firstOrNull { it.tag == hadFocus }?.requestFocus()

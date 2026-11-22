@@ -27,14 +27,15 @@ import android.widget.TextView
  */
 object Ui {
     const val BG = 0xFF000000.toInt()
-    const val SURFACE = 0xFF0E0F12.toInt()
-    const val SURFACE_HIGH = 0xFF1A1C21.toInt()
-    const val OUTLINE = 0xFF3B3E45.toInt()
+    const val SURFACE = 0xFF0B0C0E.toInt()
+    const val SURFACE_HIGH = 0xFF17191D.toInt()
+    const val OUTLINE = 0xFF2E3137.toInt()
+    const val OUTLINE_SOFT = 0xFF1B1D21.toInt()
     const val ON_SURFACE = 0xFFE3E2E6.toInt()
     const val ON_SURFACE_VAR = 0xFFA8ABB3.toInt()
     const val PRIMARY = 0xFF9ECAFF.toInt()
     const val ON_PRIMARY = 0xFF00325A.toInt()
-    const val TONAL = 0xFF1D2B3B.toInt()
+    const val TONAL = 0xFF17222F.toInt()
     const val ON_TONAL = 0xFFD2E4FF.toInt()
     const val ERROR = 0xFFFFB4AB.toInt()
     const val WARN = 0xFFFFCF87.toInt()
@@ -60,7 +61,7 @@ object Ui {
         ellipsize = if (middle) TextUtils.TruncateAt.MIDDLE else TextUtils.TruncateAt.END
     }
 
-    private fun rounded(ctx: Context, fill: Int, radiusDp: Int, strokeColor: Int = 0, strokeDp: Int = 0): GradientDrawable =
+    fun rounded(ctx: Context, fill: Int, radiusDp: Int, strokeColor: Int = 0, strokeDp: Int = 0): GradientDrawable =
         GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadius = dp(ctx, radiusDp).toFloat()
@@ -86,13 +87,13 @@ object Ui {
             text = label
             isAllCaps = false
             stateListAnimator = null
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
             typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            minHeight = dp(ctx, 56)
-            minimumHeight = dp(ctx, 56)
-            minWidth = dp(ctx, 64)
-            minimumWidth = dp(ctx, 64)
-            setPadding(dp(ctx, 20), 0, dp(ctx, 20), 0)
+            minHeight = dp(ctx, 48)
+            minimumHeight = dp(ctx, 48)
+            minWidth = dp(ctx, 48)
+            minimumWidth = dp(ctx, 48)
+            setPadding(dp(ctx, 16), 0, dp(ctx, 16), 0)
             isFocusable = true
             val (fill, stroke, fg) = when (style) {
                 Style.FILLED -> Triple(PRIMARY, 0, ON_PRIMARY)
@@ -100,7 +101,7 @@ object Ui {
                 Style.OUTLINED -> Triple(BG, OUTLINE, PRIMARY)
                 Style.TEXT -> Triple(Color.TRANSPARENT, 0, PRIMARY)
             }
-            background = stateBackground(ctx, fill, stroke, 28, withAlpha(fg, 0.25f))
+            background = stateBackground(ctx, fill, stroke, 12, withAlpha(fg, 0.25f))
             setTextColor(
                 ColorStateList(
                     arrayOf(intArrayOf(-android.R.attr.state_enabled), IntArray(0)),
@@ -110,19 +111,50 @@ object Ui {
             setOnClickListener { onClick(it) }
         }
 
-    /** Botão compacto (40 dp) para ações dentro dos cartões. */
+    /** Botão compacto (36 dp) para ações dentro dos cartões. */
     fun smallButton(ctx: Context, label: CharSequence, style: Style = Style.OUTLINED, onClick: (View) -> Unit): Button =
         button(ctx, label, style, onClick).apply {
-            minHeight = dp(ctx, 44)
-            minimumHeight = dp(ctx, 44)
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-            setPadding(dp(ctx, 16), 0, dp(ctx, 16), 0)
+            minHeight = dp(ctx, 36)
+            minimumHeight = dp(ctx, 36)
+            minWidth = dp(ctx, 36)
+            minimumWidth = dp(ctx, 36)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            setPadding(dp(ctx, 12), 0, dp(ctx, 12), 0)
         }
+
+    /** Grupo segmentado (perfil, modo): o item selecionado fica preenchido. */
+    fun segmented(ctx: Context, labels: List<String>, selected: Int, tagPrefix: String, onSelect: (Int) -> Unit): LinearLayout {
+        val row = row(ctx, 6)
+        labels.forEachIndexed { i, label ->
+            val b = smallButton(ctx, label, if (i == selected) Style.FILLED else Style.OUTLINED) { onSelect(i) }
+            b.tag = "$tagPrefix$i"
+            b.minHeight = dp(ctx, 40)
+            b.minimumHeight = dp(ctx, 40)
+            row.addView(b, weighted())
+        }
+        return row
+    }
+
+    /** Rótulo pequeno em caixa alta para seções. */
+    fun label(ctx: Context, s: String): TextView = text(ctx, s.uppercase(), 11f, ON_SURFACE_VAR, bold = true).apply {
+        letterSpacing = 0.08f
+    }
+
+    /** Selo de estado (fundo suave na cor do estado). */
+    fun badge(ctx: Context): TextView = text(ctx, "", 11f, PRIMARY, bold = true).apply {
+        setPadding(dp(ctx, 8), dp(ctx, 2), dp(ctx, 8), dp(ctx, 2))
+    }
+
+    fun setBadge(tv: TextView, s: String, color: Int) {
+        tv.text = s
+        tv.setTextColor(color)
+        tv.background = rounded(tv.context, withAlpha(color, 0.14f), 6)
+    }
 
     fun card(ctx: Context): LinearLayout = LinearLayout(ctx).apply {
         orientation = LinearLayout.VERTICAL
-        background = rounded(ctx, SURFACE, 24, 0xFF1C1E23.toInt(), 1)
-        val p = dp(ctx, 16)
+        background = rounded(ctx, SURFACE, 14, OUTLINE_SOFT, 1)
+        val p = dp(ctx, 12)
         setPadding(p, p, p, p)
     }
 
@@ -143,13 +175,13 @@ object Ui {
         ProgressBar(ctx, null, android.R.attr.progressBarStyleHorizontal).apply {
             isIndeterminate = false
             max = 1000
-            val track = rounded(ctx, SURFACE_HIGH, 6)
-            val bar = ClipDrawable(rounded(ctx, PRIMARY, 6), Gravity.START, ClipDrawable.HORIZONTAL)
+            val track = rounded(ctx, SURFACE_HIGH, 4)
+            val bar = ClipDrawable(rounded(ctx, PRIMARY, 4), Gravity.START, ClipDrawable.HORIZONTAL)
             progressDrawable = LayerDrawable(arrayOf(track, bar)).apply {
                 setId(0, android.R.id.background)
                 setId(1, android.R.id.progress)
             }
-            minimumHeight = dp(ctx, 10)
+            minimumHeight = dp(ctx, 6)
         }
 
     fun lp(w: Int = ViewGroup.LayoutParams.MATCH_PARENT, h: Int = ViewGroup.LayoutParams.WRAP_CONTENT, weight: Float = 0f) =

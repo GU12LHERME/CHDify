@@ -76,6 +76,44 @@ all=1; for i in 1 2 3; do cmp -s "$OUT/rt$i.bin" "$FX/mixed (Track 0$i).bin" || 
 [[ $all == 1 ]] && ok "trilhas de dados e áudio idênticas após extractcd" || bad "extractcd trilhas"
 [[ $("$ENG" info "$OUT/mixed_cd.chd") == *'"type":"cd","tracks":3'* ]] && ok "metadados de 3 trilhas no CHD" || bad "info cd"
 
+echo "== Perfis de compactação (codecs e hunk), lidos pelo chdman oficial"
+want=$(sha1sum "$FX/ps2_dvd.iso" | cut -c1-40)
+for prof in "zlib:16384" "lzma,zlib,huff,flac:32768" "lzma,zlib,huff,flac:65536"; do
+	c="${prof%%:*}"; h="${prof##*:}"
+	r=$("$ENG" dvd "$FX/ps2_dvd.iso" "$OUT/prof.chd" --codecs "$c" --hunk "$h" --quiet)
+	[[ $(echo "$r" | code) == 0 && $(echo "$r" | field rawSha1) == "$want" ]] && ok "DVD $c hunk $h: SHA-1 dos dados confere" || bad "perfil dvd $prof: $r"
+	"$REF" verify -i "$OUT/prof.chd" >/dev/null 2>&1 && ok "DVD $c hunk $h: chdman oficial verifica" || bad "chdman verify $prof"
+	"$REF" extractdvd -i "$OUT/prof.chd" -o "$OUT/prof.iso" -f >/dev/null 2>&1
+	cmp -s "$OUT/prof.iso" "$FX/ps2_dvd.iso" && ok "DVD $c hunk $h: extractdvd idêntico" || bad "extract $prof"
+	rm -f "$OUT/prof.iso"
+done
+for prof in "cdzl,cdfl:19584" "cdlz,cdzl,cdfl:39168"; do
+	c="${prof%%:*}"; h="${prof##*:}"
+	r=$("$ENG" cd "$FX/mixed.cue" "$OUT/profcd.chd" --codecs "$c" --hunk "$h" --quiet)
+	[[ $(echo "$r" | code) == 0 ]] && ok "CD $c hunk $h convertido" || bad "perfil cd $prof: $r"
+	"$REF" verify -i "$OUT/profcd.chd" >/dev/null 2>&1 && ok "CD $c hunk $h: chdman oficial verifica" || bad "chdman verify cd $prof"
+	( cd "$OUT" && rm -f pc*.bin && "$REF" extractcd -i profcd.chd -o pc.cue -ob "pc%t.bin" -sb -f >/dev/null 2>&1 )
+	all=1; for i in 1 2 3; do cmp -s "$OUT/pc$i.bin" "$FX/mixed (Track 0$i).bin" || all=0; done
+	[[ $all == 1 ]] && ok "CD $c hunk $h: trilhas idênticas após extractcd" || bad "extractcd $prof"
+done
+r=$("$ENG" dvd "$FX/ps2_dvd.iso" "$OUT/x.chd" --hunk 3000 --quiet); [[ $(echo "$r" | code) == 2 ]] && ok "hunk inválido recusado" || bad "hunk inválido: $r"
+r=$("$ENG" cd "$FX/mixed.cue" "$OUT/x.chd" --codecs lzma --quiet); [[ $(echo "$r" | code) == 2 ]] && ok "codec de DVD recusado em CD" || bad "codec cd: $r"
+
+echo "== Verificação paralela"
+s1=$("$ENG" verify "$OUT/ps2_dvd.chd" --threads 1 --quiet | field rawSha1)
+s4=$("$ENG" verify "$OUT/ps2_dvd.chd" --threads 4 --quiet | field rawSha1)
+[[ -n "$s1" && "$s1" == "$s4" ]] && ok "1 thread e 4 threads calculam o mesmo SHA-1" || bad "verify paralelo: $s1 / $s4"
+r=$("$ENG" verify "$OUT/ps2_dvd.chd" --threads 4 --cancel-at 0.3 --quiet); [[ $(echo "$r" | code) == 1 ]] && ok "verificação cancelada" || bad "cancel verify: $r"
+for pos in 0.2 0.5 0.9; do
+	cp "$OUT/ps2_dvd.chd" "$OUT/corr.chd"
+	python3 - "$OUT/corr.chd" "$pos" <<'PY'
+import os, sys
+p = sys.argv[1]; off = int(os.path.getsize(p) * float(sys.argv[2]))
+f = open(p, "r+b"); f.seek(off); d = bytes(b ^ 0xA5 for b in f.read(32)); f.seek(off); f.write(d)
+PY
+	r=$("$ENG" verify "$OUT/corr.chd" --threads 4 --quiet); [[ $(echo "$r" | code) == 6 ]] && ok "corrupção a ${pos} do arquivo detectada (4 threads)" || bad "corr $pos: $r"
+done
+
 echo "== Cancelamento"
 r=$("$ENG" dvd "$FX/ps2_dvd.iso" "$OUT/cancel.chd" --cancel-at 0.3 --quiet)
 [[ $(echo "$r" | code) == 1 && ! -e "$OUT/cancel.chd" ]] && ok "DVD cancelado a 30% (código 1, sem arquivo parcial)" || bad "cancel dvd: $r"

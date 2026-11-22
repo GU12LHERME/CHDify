@@ -10,7 +10,7 @@ Funciona offline, sem root, sem Termux e sem aplicativos adicionais.
 |---|---|
 | Núcleo | `chd.cpp`, `chdcodec.cpp`, `cdrom.cpp` e `chdman.cpp` do MAME, sem modificações (commit em `app/src/main/cpp/mame/MAME_COMMIT`) |
 | Saída | Os CHDs gerados pelo motor são **idênticos byte a byte** aos do `chdman createdvd` / `createcd` oficial (verificado nos testes) |
-| Modos | DVD (`createdvd`, codecs lzma/zlib/huff/flac, hunk de 4 KiB) e CD (`createcd`, cdlz/cdzl/cdfl, 8 quadros por hunk) |
+| Modos | DVD (`createdvd`) e CD (`createcd`), com três perfis de compactação (Rápido, Equilibrado = padrão do chdman, Máximo) |
 | Entradas | `.iso`, `.img`, `.bin` avulso, `.cue` (+ `.bin`/`.wav`), `.gdi` (GD-ROM) |
 | Arquivos > 4 GB | Sim (E/S de 64 bits, testado com 4,3 GB) |
 | Plataforma | Android 10+ (API 29), alvo API 36 (Android 16), arm64-v8a, páginas de 16 KB |
@@ -27,7 +27,10 @@ Funciona offline, sem root, sem Termux e sem aplicativos adicionais.
   tamanho original e tamanho final (estimativa durante a conversão, valor real ao final).
 - Cancelamento seguro: o núcleo para no próximo bloco, o arquivo parcial é apagado e a fila pode continuar depois.
 - Verificação de integridade opcional (padrão: ligada), equivalente a `chdman verify`: todos os hunks são
-  descomprimidos e os SHA-1 (dados e global) conferidos. O SHA-1 dos dados também é comparado com o da conversão.
+  descomprimidos (em paralelo) e os SHA-1 (dados e global) conferidos. O SHA-1 dos dados também é comparado com o da conversão.
+- Três perfis de compactação e opções avançadas (tamanho de hunk por tipo de mídia, número de threads). Veja abaixo.
+- O CHD é gravado como `Nome.chd.parcial` e só recebe o nome final depois de convertido e verificado. Se o app
+  for encerrado no meio, o arquivo incompleto é apagado na próxima abertura.
 - O arquivo original é aberto somente para leitura; nada no destino é sobrescrito (`Jogo (2).chd`, ...).
 - Log detalhado por item (mensagens do chdman, trilhas, codecs, SHA-1), com botão para copiar.
 - Interface em português, fundo preto puro (OLED), navegação por toque, D-pad e gamepad.
@@ -43,6 +46,29 @@ Funciona offline, sem root, sem Termux e sem aplicativos adicionais.
 | X | adicionar arquivos |
 | Y | cancelar (com confirmação) |
 | Select | log do item atual |
+| L1 / R1 | troca o perfil de compactação |
+
+## Perfis de compactação
+
+Todos são sem perdas e usam apenas codecs e tamanhos de hunk aceitos pelo chdman oficial. Os valores foram
+escolhidos por medição (`tests/bench/RESULTADOS.md`; imagens sintéticas, 2 núcleos x86_64):
+
+| Perfil | DVD | CD | Resultado medido (DVD / CD) |
+|---|---|---|---|
+| Rápido | zlib, hunk 16 KiB | cdzl + cdfl, 8 quadros | 4,4× / 1,9× mais rápido que o padrão; DVD até menor, CD +1,6 p.p. |
+| Equilibrado (padrão) | padrão do chdman (lzma/zlib/huff/flac, 4 KiB) | padrão (cdlz/cdzl/cdfl, 8 quadros) | idêntico byte a byte ao chdman |
+| Máximo | lzma/zlib/huff/flac, hunk 32 KiB | padrão, 16 quadros | −3,7 p.p. / −0,8 p.p. de tamanho |
+
+O zstd foi avaliado e descartado: no MAME, ficou mais lento e maior que o lzma, e leitores antigos não o
+suportam. Hunks maiores (DVD 64 KiB, CD 32 quadros) estão nas opções avançadas.
+
+### Threads
+
+A fila de trabalho do MAME cria `N − 1` threads de compressão, e a thread principal só lê e grava. O modo
+automático passa `N = núcleos + 1` (o mesmo que `chdman -np`), para que todos os núcleos comprimam; neste
+ambiente de 2 núcleos, isso dobrou a velocidade. A fila distribui os hunks dinamicamente, então os núcleos de
+desempenho processam mais itens que os de eficiência. As threads rodam com prioridade levemente reduzida, para
+a interface continuar fluida. O número de threads é fixado no início de cada item; não há ajuste dinâmico.
 
 ## Como o modo (CD ou DVD) é escolhido
 
@@ -95,15 +121,15 @@ app/src/main/
 ### Desempenho
 
 - Compressão multinúcleo pela fila de trabalho do MAME (`osd_work_queue`), automática ou com número de núcleos fixo.
-- Processamento por blocos: o compressor mantém 256 hunks em memória (≈1 MB em DVD, ≈5 MB em CD).
-  A verificação usa um buffer de 4 MB. O consumo de RAM não depende do tamanho do arquivo.
+- Processamento por blocos: o compressor mantém 256 hunks em memória (de ≈1 MB a 16 MB, conforme o hunk).
+  A verificação usa 2 blocos de 2 MB por thread. O consumo de RAM não depende do tamanho do arquivo (picos medidos de 15 a 37 MB).
 - `-O3`, NEON no ARM64, alinhamento de 16 KB para Android 15+.
 
 ## Testes
 
 ### Motor nativo (`tests/native/run_tests.sh`)
 
-Gera imagens de teste sintéticas (sem conteúdo protegido) e executa 46 verificações, todas aprovadas em
+Gera imagens de teste sintéticas (sem conteúdo protegido) e executa 68 verificações, todas aprovadas em
 x86_64 (GCC e Clang/libc++) e em ARM64 (compilação cruzada executada no QEMU):
 
 - DVD: CHD idêntico byte a byte ao `chdman createdvd`, SHA-1 dos dados igual ao SHA-1 da ISO,
@@ -115,6 +141,8 @@ x86_64 (GCC e Clang/libc++) e em ARM64 (compilação cruzada executada no QEMU):
 - Falta de espaço (código 3), tamanho inválido, `.cue` com arquivo ausente, `.cue` inválido,
   CHD corrompido reprovado, arquivo que não é CHD reprovado.
 - Imagem de 4,3 GB com dados aleatórios depois da fronteira de 4 GiB: SHA-1 confere e a verificação passa.
+- Perfis (zlib 16K, hunks de 32K e 64K, CD 8/16 quadros): verificados e extraídos pelo chdman oficial, com dados idênticos.
+- Verificação paralela: mesmo SHA-1 com 1 e 4 threads, cancelamento, corrupção detectada em vários pontos do arquivo.
 
 Para executar localmente:
 
@@ -164,7 +192,6 @@ tests/native/run_tests.sh <build-host>
   de espelhos não cobre.
 - Arquivos que o provedor entrega como fluxo (nuvem/rede, sem tamanho fixo) são recusados. Copie-os
   para o armazenamento do aparelho antes.
-- A verificação é sequencial (um núcleo), como no chdman.
 - Ao cancelar uma conversão, a fila de trabalho do MAME deixa algumas dezenas de KB sem liberar até o
   processo terminar. É um comportamento do código original, que nunca é interrompido no meio pelo chdman.
 - A fila fica na memória: se o sistema encerrar o app, os itens precisam ser adicionados de novo.

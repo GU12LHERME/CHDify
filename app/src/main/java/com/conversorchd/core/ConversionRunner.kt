@@ -40,14 +40,24 @@ class ConversionRunner(private val ctx: Context, private val prefs: Prefs, priva
             return
         }
 
+        val profile = prefs.profile
+        val params = CompressionParams.of(profile, mode, prefs.dvdHunk, prefs.cdHunk)
+        job.profile = profile
+        job.bytesWritten = 0
+        job.log("Perfil: ${profile.name} — ${params.describe(mode)}; threads: ${if (prefs.threads > 0) prefs.threads else "auto"}")
+
         var outUri: Uri? = null
+        var pendingKey: String? = null
         var success = false
         try {
-            val (uri, name) = Storage.createUniqueDocument(cr, tree, Storage.baseName(job.displayName), "chd")
+            val output = Storage.createPartialDocument(cr, tree, Storage.baseName(job.displayName), "chd")
+            val uri = output.uri
             outUri = uri
+            pendingKey = uri.toString()
+            prefs.addPendingOutput(uri.toString())
             job.outputUri = uri
-            job.outputName = name
-            job.log("Destino: $name")
+            job.outputName = output.finalName
+            job.log("Destino: ${output.currentName}${if (output.partial) " (renomeado para ${output.finalName} ao concluir)" else ""}")
 
             val result = cr.openFileDescriptor(uri, "rw").use { outPfd ->
                 outPfd ?: throw IllegalStateException(ctx.getString(R.string.err_create_output))
@@ -65,12 +75,14 @@ class ConversionRunner(private val ctx: Context, private val prefs: Prefs, priva
                             inPfd ?: throw IllegalStateException(ctx.getString(R.string.err_open))
                             val size = Storage.regularFileSize(inPfd)
                             if (size < 0) throw IllegalStateException(ctx.getString(R.string.err_not_regular))
-                            NativeResult.parse(NativeChd.convertDvd(inPfd.fd, outPfd.fd, prefs.threads, listener))
+                            NativeResult.parse(NativeChd.convertDvd(inPfd.fd, outPfd.fd, prefs.threads, params.hunkBytes, params.codecs, listener))
                         }
                     }
                     DiscMode.CD -> {
                         WorkDir.prepareCd(ctx, job).use { p ->
-                            NativeResult.parse(NativeChd.convertCd(p.tocPath, p.trackPaths, p.trackFds, outPfd.fd, prefs.threads, listener))
+                            NativeResult.parse(
+                                NativeChd.convertCd(p.tocPath, p.trackPaths, p.trackFds, outPfd.fd, prefs.threads, params.hunkBytes, params.codecs, listener),
+                            )
                         }
                     }
                 }
@@ -100,7 +112,7 @@ class ConversionRunner(private val ctx: Context, private val prefs: Prefs, priva
                 onUpdate(job)
                 val v = cr.openFileDescriptor(uri, "r").use { pfd ->
                     pfd ?: throw IllegalStateException(ctx.getString(R.string.err_open))
-                    NativeResult.parse(NativeChd.verify(pfd.fd, ProgressListener(job)))
+                    NativeResult.parse(NativeChd.verify(pfd.fd, prefs.threads, ProgressListener(job)))
                 }
                 job.log("Verificação: código ${v.code} ${v.message}".trim())
                 if (!v.ok) {
@@ -114,8 +126,24 @@ class ConversionRunner(private val ctx: Context, private val prefs: Prefs, priva
                 job.verified = true
             }
 
+            // conversão concluída: dá o nome definitivo ao arquivo
+            var finalUri = uri
+            if (output.partial) {
+                val renamed = Storage.rename(cr, uri, output.finalName)
+                if (renamed != null) {
+                    finalUri = renamed
+                    job.outputName = Storage.describe(cr, renamed)?.name ?: output.finalName
+                    job.log("Renomeado para ${job.outputName}")
+                } else {
+                    job.outputName = output.currentName
+                    job.log("Aviso: não foi possível renomear; o arquivo ficou como ${output.currentName}")
+                }
+            }
+            job.outputUri = finalUri
+            outUri = finalUri
+
             // tamanho final e tipo, lidos do próprio CHD
-            cr.openFileDescriptor(uri, "r")?.use { pfd ->
+            cr.openFileDescriptor(finalUri, "r")?.use { pfd ->
                 val info = JSONObject(NativeChd.chdInfo(pfd.fd))
                 if (info.optBoolean("ok")) {
                     job.outputBytes = info.optLong("fileBytes", job.outputBytes)
@@ -133,6 +161,7 @@ class ConversionRunner(private val ctx: Context, private val prefs: Prefs, priva
                 job.log(if (deleted) "Arquivo parcial removido" else "Não foi possível remover o arquivo parcial")
                 job.outputUri = null
             }
+            pendingKey?.let { prefs.removePendingOutput(it) }
         }
     }
 
@@ -161,7 +190,7 @@ class ConversionRunner(private val ctx: Context, private val prefs: Prefs, priva
         private var lastBytes = 0L
         private var lastTime = SystemClock.elapsedRealtime()
 
-        override fun onProgress(stage: Int, fraction: Double, ratio: Double, done: Long, total: Long) {
+        override fun onProgress(stage: Int, fraction: Double, ratio: Double, done: Long, total: Long, written: Long) {
             val now = SystemClock.elapsedRealtime()
             if (stage != job.stage) {
                 job.stage = stage
@@ -181,6 +210,7 @@ class ConversionRunner(private val ctx: Context, private val prefs: Prefs, priva
             if (stage == 0) job.ratio = ratio
             job.bytesDone = done
             job.bytesTotal = total
+            if (stage == 0) job.bytesWritten = written
             onUpdate(job)
         }
 

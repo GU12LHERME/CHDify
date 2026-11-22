@@ -6,7 +6,7 @@
 //   chdengine_cli probe <imagem>
 //   chdengine_cli probetoc <arquivo.cue|.gdi|.iso>
 //   chdengine_cli dvd <entrada.iso> <saida.chd> [--threads N] [--cancel-at F]
-//   chdengine_cli cd <entrada.cue|.iso|.gdi> <saida.chd> [--threads N] [--cancel-at F] [--via-fd]
+//   chdengine_cli cd <entrada.cue|.iso|.gdi> <saida.chd> [--threads N] [--hunk B] [--codecs a,b] [--cancel-at F] [--via-fd]
 //   chdengine_cli verify <arquivo.chd>
 //   chdengine_cli info <arquivo.chd>
 
@@ -45,24 +45,30 @@ int main(int argc, char **argv)
 	double cancel_at = -1.0;
 	bool quiet = false;
 	bool via_fd = false;
+	unsigned hunk = 0;
+	std::string codecs;
 	for (int i = 2; i < argc; ++i)
 	{
 		if (!std::strcmp(argv[i], "--threads") && i + 1 < argc) threads = std::atoi(argv[++i]);
 		else if (!std::strcmp(argv[i], "--cancel-at") && i + 1 < argc) cancel_at = std::atof(argv[++i]);
 		else if (!std::strcmp(argv[i], "--quiet")) quiet = true;
 		else if (!std::strcmp(argv[i], "--via-fd")) via_fd = true;
+		else if (!std::strcmp(argv[i], "--hunk") && i + 1 < argc) hunk = unsigned(std::atoi(argv[++i]));
+		else if (!std::strcmp(argv[i], "--codecs") && i + 1 < argc) codecs = argv[++i];
 	}
 
 	std::atomic<bool> cancel{ false };
 	Options opt;
 	opt.threads = threads;
+	opt.hunk_bytes = hunk;
+	opt.codecs = codecs;
 	opt.cancel = &cancel;
 	opt.progress_interval_ms = 500;
 	opt.log = [&](std::string const &m) { if (!quiet) std::fprintf(stderr, "LOG %s\n", m.c_str()); };
 	opt.progress = [&](Progress const &p) {
 		if (!quiet)
-			std::fprintf(stderr, "PROGRESS stage=%d %.2f%% ratio=%.3f %llu/%llu\n", int(p.stage), 100.0 * p.fraction,
-					p.ratio, (unsigned long long)p.done, (unsigned long long)p.total);
+			std::fprintf(stderr, "PROGRESS stage=%d %.2f%% ratio=%.3f %llu/%llu escrito=%llu\n", int(p.stage), 100.0 * p.fraction,
+					p.ratio, (unsigned long long)p.done, (unsigned long long)p.total, (unsigned long long)p.written);
 		if (cancel_at >= 0.0 && p.fraction >= cancel_at)
 			cancel.store(true);
 	};

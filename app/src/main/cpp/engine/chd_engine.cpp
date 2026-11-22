@@ -26,7 +26,9 @@
 #include "fd_file.h"
 
 #include <chrono>
+#include <condition_variable>
 #include <map>
+#include <thread>
 #include <mutex>
 #include <sstream>
 #include <streambuf>
@@ -171,13 +173,14 @@ void log(Options const &opt, std::string const &msg)
 		opt.log(msg);
 }
 
-void emit(Options const &opt, Throttle &t, Stage stage, double fraction, double ratio, std::uint64_t total, bool force = false)
+void emit(Options const &opt, Throttle &t, Stage stage, double fraction, double ratio, std::uint64_t total, bool force = false,
+		std::uint64_t written = 0)
 {
 	if (!opt.progress || !t.ready(force))
 		return;
 	if (fraction < 0.0) fraction = 0.0;
 	if (fraction > 1.0) fraction = 1.0;
-	opt.progress(Progress{ stage, fraction, ratio, std::uint64_t(double(total) * fraction), total });
+	opt.progress(Progress{ stage, fraction, ratio, std::uint64_t(double(total) * fraction), total, written });
 }
 
 bool is_no_space(int e)
@@ -409,7 +412,7 @@ Result run_compression(chd_file_compressor &chd, FdFile &out, Options const &opt
 			err = chd.compress_continue(complete, ratio);
 			if (err != chd_file::error::COMPRESSING && err != chd_file::error::WALKING_PARENT)
 				break;
-			emit(opt, throttle, Stage::COMPRESS, complete, ratio, logical);
+			emit(opt, throttle, Stage::COMPRESS, complete, ratio, logical, false, out.bytes_written());
 		}
 	}
 	catch (std::error_condition const &e)
@@ -455,7 +458,7 @@ Result run_compression(chd_file_compressor &chd, FdFile &out, Options const &opt
 		return r;
 	}
 
-	emit(opt, throttle, Stage::COMPRESS, 1.0, ratio, logical, true);
+	emit(opt, throttle, Stage::COMPRESS, 1.0, ratio, logical, true, out.bytes_written());
 
 	if (std::error_condition const se = out.sync())
 	{
@@ -497,9 +500,230 @@ std::unique_ptr<FdFile> open_output(int out_fd, Result &r)
 	return out;
 }
 
+// A fila de compressão do MAME (WORK_QUEUE_FLAG_MULTI) cria N-1 threads, onde N
+// é osd_num_processors; a thread que chama compress_continue() só lê, grava e
+// espera. Por isso "automático" usa núcleos + 1: todos os núcleos comprimem.
+// É o mesmo que "chdman -np <núcleos+1>"; o MAME limita a 4x os núcleos físicos.
 void configure_threads(Options const &opt)
 {
-	osd_num_processors = opt.threads > 0 ? opt.threads : 0;
+	int const cores = std::max(1u, std::thread::hardware_concurrency());
+	int const workers = opt.threads > 0 ? opt.threads : cores;
+	osd_num_processors = workers + 1;
+}
+
+int effective_threads(Options const &opt)
+{
+	return opt.threads > 0 ? opt.threads : std::max(1u, std::thread::hardware_concurrency());
+}
+
+// Interpreta a lista de codecs e valida contra o tipo de mídia.
+bool parse_codecs(std::string const &spec, bool cd, chd_codec_type (&out)[4], std::string &err)
+{
+	for (auto &c : out)
+		c = CHD_CODEC_NONE;
+	if (spec.empty())
+		return true;
+	static char const *const dvd_ok[] = { "lzma", "zlib", "huff", "flac", "zstd" };
+	static char const *const cd_ok[] = { "cdlz", "cdzl", "cdfl", "cdzs" };
+	int n = 0;
+	std::size_t pos = 0;
+	while (pos <= spec.size())
+	{
+		std::size_t const comma = spec.find(',', pos);
+		std::string const name = spec.substr(pos, comma == std::string::npos ? std::string::npos : comma - pos);
+		pos = comma == std::string::npos ? spec.size() + 1 : comma + 1;
+		if (name.empty())
+			continue;
+		bool valid = false;
+		if (cd)
+			for (char const *v : cd_ok) valid = valid || name == v;
+		else
+			for (char const *v : dvd_ok) valid = valid || name == v;
+		if (!valid || name.size() != 4)
+		{
+			err = "codec not allowed for this media: " + name;
+			return false;
+		}
+		if (n == 4)
+		{
+			err = "at most 4 codecs";
+			return false;
+		}
+		out[n++] = CHD_MAKE_TAG(name[0], name[1], name[2], name[3]);
+	}
+	return true;
+}
+
+// Valida o tamanho do hunk (mesmas regras do chdman: múltiplo da unidade, até 1 MiB).
+bool check_hunk(unsigned hunk, unsigned unit, std::string &err)
+{
+	if (hunk == 0)
+		return true;
+	if (hunk % unit != 0 || hunk < unit || hunk > HUNK_SIZE_MAX)
+	{
+		err = util::string_format("invalid hunk size %u (must be a multiple of %u, up to %u)", hunk, unit, HUNK_SIZE_MAX);
+		return false;
+	}
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+//  Verificação paralela
+//
+//  O "chdman verify" lê o CHD sequencialmente numa única thread; a
+//  descompressão (LZMA/FLAC) é o gargalo. Aqui várias threads descomprimem
+//  blocos diferentes, cada uma com sua própria instância de chd_file (o estado
+//  dos decompressores não é compartilhável), e a thread chamadora acumula o
+//  SHA-1 dos blocos estritamente em ordem. O resultado é o mesmo SHA-1 que o
+//  chdman calcularia. A memória fica limitada: 2 blocos de 2 MiB por thread, e
+//  o número de instâncias é reduzido se o mapa de hunks do CHD for grande.
+// ---------------------------------------------------------------------------
+struct VerifyOutcome
+{
+	std::error_condition err;
+	std::uint64_t err_offset = 0;
+	bool cancelled = false;
+	bool alloc_failed = false;
+	util::sha1_t sha1;
+};
+
+int verify_workers(chd_file &chd, Options const &opt)
+{
+	int workers = std::clamp(effective_threads(opt), 1, 6);
+	// mapa descomprimido do CHD v5: 12 bytes por hunk, por instância
+	std::uint64_t const map_bytes = std::uint64_t(chd.hunk_count()) * 12;
+	while (workers > 1 && std::uint64_t(workers - 1) * map_bytes > 48ULL * 1024 * 1024)
+		--workers;
+	if (chd.logical_bytes() < 8ULL * 1024 * 1024)
+		workers = 1;
+	return workers;
+}
+
+VerifyOutcome parallel_verify(int fd, chd_file &primary, int workers, Options const &opt, Throttle &throttle)
+{
+	VerifyOutcome out;
+	std::uint64_t const total = primary.logical_bytes();
+	std::uint32_t const hunk = primary.hunk_bytes();
+	std::uint32_t const chunk = std::max<std::uint32_t>(1, (2 * 1024 * 1024) / hunk) * hunk;
+	std::uint64_t const nchunks = (total + chunk - 1) / chunk;
+
+	// instâncias: a principal + (workers - 1) extras, cada uma com seu descritor
+	std::vector<chd_file *> inst{ &primary };
+	std::vector<std::unique_ptr<chd_file>> extra;
+	for (int i = 1; i < workers; ++i)
+	{
+		std::error_condition e;
+		auto f = FdFile::from_fd(fd, false, e);
+		if (!f)
+			break;
+		auto c = std::make_unique<chd_file>();
+		if (c->open(std::move(f)))
+			break;
+		inst.push_back(c.get());
+		extra.push_back(std::move(c));
+	}
+	std::size_t const nthreads = inst.size();
+	std::size_t const slots = nthreads * 2;
+
+	std::vector<std::vector<std::uint8_t>> buf;
+	try
+	{
+		buf.assign(slots, std::vector<std::uint8_t>(chunk));
+	}
+	catch (std::bad_alloc const &)
+	{
+		out.err = std::errc::not_enough_memory;
+		out.alloc_failed = true;
+		return out;
+	}
+	std::vector<std::int64_t> ready(slots, -1);
+	std::mutex m;
+	std::condition_variable cv_ready, cv_free;
+	std::uint64_t next = 0, consumed = 0;
+	bool stop = false;
+
+	auto worker = [&](chd_file *chd) {
+		for (;;)
+		{
+			std::uint64_t c;
+			{
+				std::unique_lock<std::mutex> lock(m);
+				cv_free.wait(lock, [&] { return stop || next >= nchunks || next < consumed + slots; });
+				if (stop || next >= nchunks)
+					return;
+				c = next++;
+			}
+			std::uint64_t const off = c * chunk;
+			std::uint32_t const n = std::uint32_t(std::min<std::uint64_t>(chunk, total - off));
+			std::error_condition const e = chd->read_bytes(off, buf[c % slots].data(), n);
+			std::lock_guard<std::mutex> lock(m);
+			if (e)
+			{
+				if (!out.err)
+				{
+					out.err = e;
+					out.err_offset = off;
+				}
+				stop = true;
+				cv_ready.notify_all();
+				cv_free.notify_all();
+				return;
+			}
+			ready[c % slots] = std::int64_t(c);
+			cv_ready.notify_all();
+		}
+	};
+
+	std::vector<std::thread> threads;
+	threads.reserve(nthreads);
+	for (chd_file *c : inst)
+		threads.emplace_back(worker, c);
+
+	util::sha1_creator sha;
+	for (std::uint64_t c = 0; c < nchunks; ++c)
+	{
+		{
+			std::unique_lock<std::mutex> lock(m);
+			if (is_cancelled(opt))
+			{
+				out.cancelled = true;
+				stop = true;
+				cv_free.notify_all();
+			}
+			while (!stop && ready[c % slots] != std::int64_t(c))
+			{
+				cv_ready.wait_for(lock, std::chrono::milliseconds(100));
+				if (is_cancelled(opt))
+				{
+					out.cancelled = true;
+					stop = true;
+					cv_free.notify_all();
+				}
+			}
+			if (stop)
+				break;
+		}
+		std::uint64_t const off = c * chunk;
+		std::uint32_t const n = std::uint32_t(std::min<std::uint64_t>(chunk, total - off));
+		sha.append(buf[c % slots].data(), n);
+		emit(opt, throttle, Stage::VERIFY, double(off + n) / double(total), 1.0, total);
+		{
+			std::lock_guard<std::mutex> lock(m);
+			ready[c % slots] = -1;
+			++consumed;
+		}
+		cv_free.notify_all();
+	}
+	{
+		std::lock_guard<std::mutex> lock(m);
+		stop = true;
+	}
+	cv_free.notify_all();
+	for (auto &t : threads)
+		t.join();
+	if (!out.err && !out.cancelled)
+		out.sha1 = sha.finish();
+	return out;
 }
 
 } // anonymous namespace
@@ -542,15 +766,23 @@ Result convert_dvd(int in_fd, int out_fd, Options const &opt)
 		return r;
 	FdFile &out = *outptr;
 
-	// mesmos parâmetros padrão de "chdman createdvd"
-	uint32_t const hunk_size = 2 * 2048;
+	// padrão de "chdman createdvd": hunk de 2 setores, lzma/zlib/huff/flac
+	std::string perr;
 	chd_codec_type compression[4];
-	for (int i = 0; i < 4; ++i)
-		compression[i] = s_default_hd_compression[i];
+	if (!check_hunk(opt.hunk_bytes, 2048, perr) || !parse_codecs(opt.codecs, false, compression, perr))
+	{
+		r.code = ResultCode::INVALID_INPUT;
+		r.message = perr;
+		return r;
+	}
+	uint32_t const hunk_size = opt.hunk_bytes ? opt.hunk_bytes : 2 * 2048;
+	if (opt.codecs.empty())
+		for (int i = 0; i < 4; ++i)
+			compression[i] = s_default_hd_compression[i];
 	r.compression = codecs_string(compression);
 
-	log(opt, util::string_format("Modo DVD (createdvd): %u bytes, hunk %u, codecs %s, threads %s",
-			input_size, hunk_size, r.compression, opt.threads > 0 ? std::to_string(opt.threads) : std::string("auto")));
+	log(opt, util::string_format("Modo DVD (createdvd): %u bytes, hunk %u, codecs %s, threads %d",
+			input_size, hunk_size, r.compression, effective_threads(opt)));
 
 	try
 	{
@@ -623,10 +855,18 @@ Result convert_cd(std::string const &toc_path, std::vector<TrackFd> const &track
 		}
 	}
 
-	uint32_t const hunk_size = cdrom_file::FRAMES_PER_HUNK * cdrom_file::FRAME_SIZE;
+	std::string perr;
 	chd_codec_type compression[4];
-	for (int i = 0; i < 4; ++i)
-		compression[i] = s_default_cd_compression[i];
+	if (!check_hunk(opt.hunk_bytes, cdrom_file::FRAME_SIZE, perr) || !parse_codecs(opt.codecs, true, compression, perr))
+	{
+		r.code = ResultCode::INVALID_INPUT;
+		r.message = perr;
+		return r;
+	}
+	uint32_t const hunk_size = opt.hunk_bytes ? opt.hunk_bytes : cdrom_file::FRAMES_PER_HUNK * cdrom_file::FRAME_SIZE;
+	if (opt.codecs.empty())
+		for (int i = 0; i < 4; ++i)
+			compression[i] = s_default_cd_compression[i];
 	r.compression = codecs_string(compression);
 
 	// preenche cada trilha até múltiplo de 4 quadros (cdrom.cpp trata isso na leitura)
@@ -644,8 +884,8 @@ Result convert_cd(std::string const &toc_path, std::vector<TrackFd> const &track
 				trackinfo.frames, trackinfo.datasize, trackinfo.subsize, info->track[tracknum].fname));
 	}
 	std::uint64_t const logical = std::uint64_t(totalsectors) * cdrom_file::FRAME_SIZE;
-	log(opt, util::string_format("Modo CD (createcd): %d trilha(s), duração %s, codecs %s",
-			toc->numtrks, msf_string_from_frames(origtotalsectors), r.compression));
+	log(opt, util::string_format("Modo CD (createcd): %d trilha(s), duração %s, hunk %u, codecs %s, threads %d",
+			toc->numtrks, msf_string_from_frames(origtotalsectors), hunk_size, r.compression, effective_threads(opt)));
 
 	auto outptr = open_output(out_fd, r);
 	if (!outptr)
@@ -783,43 +1023,25 @@ Result verify(int chd_fd, Options const &opt)
 	std::uint64_t const total = input.logical_bytes();
 	r.logical_bytes = total;
 	r.hunk_bytes = input.hunk_bytes();
-	std::uint32_t const bufsize = std::max<std::uint32_t>(1, (4 * 1024 * 1024) / input.hunk_bytes()) * input.hunk_bytes();
-	std::vector<std::uint8_t> buffer;
-	try
+	Throttle throttle(opt.progress_interval_ms);
+	int const workers = verify_workers(input, opt);
+	log(opt, util::string_format("Verificação: %d thread(s) de descompressão, hunk %u", workers, input.hunk_bytes()));
+	VerifyOutcome const vo = parallel_verify(chd_fd, input, workers, opt, throttle);
+	if (vo.cancelled)
 	{
-		buffer.resize(bufsize);
-	}
-	catch (std::bad_alloc const &)
-	{
-		r.code = ResultCode::INTERNAL_ERROR;
-		r.message = "out of memory";
+		r.code = ResultCode::CANCELLED;
+		r.message = "cancelled";
 		return r;
 	}
-
-	Throttle throttle(opt.progress_interval_ms);
-	util::sha1_creator rawsha1;
-	for (std::uint64_t offset = 0; offset < total; )
+	if (vo.err)
 	{
-		if (is_cancelled(opt))
-		{
-			r.code = ResultCode::CANCELLED;
-			r.message = "cancelled";
-			return r;
-		}
-		emit(opt, throttle, Stage::VERIFY, double(offset) / double(total), 1.0, total);
-		std::uint32_t const n = std::uint32_t(std::min<std::uint64_t>(buffer.size(), total - offset));
-		err = input.read_bytes(offset, buffer.data(), n);
-		if (err)
-		{
-			r.code = ResultCode::VERIFY_FAILED;
-			r.message = util::string_format("Error reading CHD at offset %u: %s", offset, err.message());
-			return r;
-		}
-		rawsha1.append(buffer.data(), n);
-		offset += n;
+		r.code = vo.alloc_failed ? ResultCode::INTERNAL_ERROR : ResultCode::VERIFY_FAILED;
+		r.message = vo.alloc_failed ? std::string("out of memory")
+				: util::string_format("Error reading CHD at offset %u: %s", vo.err_offset, vo.err.message());
+		return r;
 	}
 	emit(opt, throttle, Stage::VERIFY, 1.0, 1.0, total, true);
-	util::sha1_t const computed = rawsha1.finish();
+	util::sha1_t const computed = vo.sha1;
 	r.raw_sha1 = computed.as_string();
 	r.sha1 = input.sha1().as_string();
 

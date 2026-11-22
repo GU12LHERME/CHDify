@@ -6,6 +6,8 @@ import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.conversorchd.core.Analyzer
+import com.conversorchd.core.CompressionParams
+import com.conversorchd.core.Profile
 import com.conversorchd.core.DiscMode
 import com.conversorchd.core.InputFile
 import com.conversorchd.core.Job
@@ -57,8 +59,10 @@ class ConversionInstrumentedTest {
         var calls = 0
         var last = 0.0
         val logs = StringBuilder()
-        override fun onProgress(stage: Int, fraction: Double, ratio: Double, done: Long, total: Long) {
+        var written = 0L
+        override fun onProgress(stage: Int, fraction: Double, ratio: Double, done: Long, total: Long, written: Long) {
             calls++
+            if (written > 0) this.written = written
             last = fraction
             if (cancelAt >= 0 && fraction >= cancelAt) NativeChd.cancel()
         }
@@ -107,17 +111,22 @@ class ConversionInstrumentedTest {
         return md.digest().joinToString("") { "%02x".format(it) }
     }
 
-    private fun convertDvd(input: File, output: File, listener: NativeListener? = null): NativeResult {
+    private fun convertDvd(
+        input: File,
+        output: File,
+        listener: NativeListener? = null,
+        params: CompressionParams = CompressionParams("", 0),
+    ): NativeResult {
         ParcelFileDescriptor.open(input, ParcelFileDescriptor.MODE_READ_ONLY).use { inPfd ->
             ParcelFileDescriptor.open(output, ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_CREATE).use { outPfd ->
-                return NativeResult.parse(NativeChd.convertDvd(inPfd.fd, outPfd.fd, 0, listener))
+                return NativeResult.parse(NativeChd.convertDvd(inPfd.fd, outPfd.fd, 0, params.hunkBytes, params.codecs, listener))
             }
         }
     }
 
-    private fun verify(chd: File): NativeResult =
+    private fun verify(chd: File, threads: Int = 0): NativeResult =
         ParcelFileDescriptor.open(chd, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
-            NativeResult.parse(NativeChd.verify(pfd.fd, null))
+            NativeResult.parse(NativeChd.verify(pfd.fd, threads, null))
         }
 
     private fun input(f: File) = InputFile(Uri.fromFile(f), f.name, f.length())
@@ -138,10 +147,28 @@ class ConversionInstrumentedTest {
         assertEquals(r.message, ResultCodes.OK, r.code)
         assertEquals(sha1(iso), r.rawSha1)
         assertTrue("progresso não reportado", rec.calls > 0)
+        assertTrue("tamanho comprimido não reportado", rec.written > 0)
         assertTrue(chd.length() in 1 until iso.length())
         val v = verify(chd)
         assertEquals(v.message, ResultCodes.OK, v.code)
         assertEquals(r.rawSha1, v.rawSha1)
+    }
+
+    @Test
+    fun allProfilesAreLosslessAndVerify() {
+        val iso = makeIso("perfis.iso", 8000, seed = 3)
+        val want = sha1(iso)
+        for (profile in Profile.values()) {
+            val chd = File(dir, "perfil-${profile.name}.chd")
+            val r = convertDvd(iso, chd, null, CompressionParams.of(profile, DiscMode.DVD))
+            assertEquals("${profile.name}: ${r.message}", ResultCodes.OK, r.code)
+            assertEquals(profile.name, want, r.rawSha1)
+            for (threads in listOf(1, 4)) {
+                val v = verify(chd, threads)
+                assertEquals("${profile.name} verify t=$threads: ${v.message}", ResultCodes.OK, v.code)
+                assertEquals(want, v.rawSha1)
+            }
+        }
     }
 
     @Test
@@ -205,7 +232,7 @@ class ConversionInstrumentedTest {
         val chd = File(dir, "jogo.chd")
         val r = WorkDir.prepareCd(ctx, job).use { p ->
             ParcelFileDescriptor.open(chd, ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_CREATE).use { out ->
-                NativeResult.parse(NativeChd.convertCd(p.tocPath, p.trackPaths, p.trackFds, out.fd, 0, null))
+                NativeResult.parse(NativeChd.convertCd(p.tocPath, p.trackPaths, p.trackFds, out.fd, 0, 0, "", null))
             }
         }
         assertEquals(r.message, ResultCodes.OK, r.code)
@@ -265,7 +292,7 @@ class ConversionInstrumentedTest {
         val chd = File(dir, "grande4g.chd")
         val done = AtomicBoolean(false)
         val r = convertDvd(iso, chd, object : NativeListener {
-            override fun onProgress(stage: Int, fraction: Double, ratio: Double, done2: Long, total: Long) {
+            override fun onProgress(stage: Int, fraction: Double, ratio: Double, done2: Long, total: Long, written: Long) {
                 if (total == size) done.set(true)
             }
             override fun onLog(message: String) {}

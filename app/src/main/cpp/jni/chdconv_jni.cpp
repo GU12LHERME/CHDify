@@ -104,7 +104,7 @@ public:
 		if (listener)
 		{
 			jclass cls = env->GetObjectClass(listener);
-			m_onProgress = env->GetMethodID(cls, "onProgress", "(IDDJJ)V");
+			m_onProgress = env->GetMethodID(cls, "onProgress", "(IDDJJJ)V");
 			m_onLog = env->GetMethodID(cls, "onLog", "(Ljava/lang/String;)V");
 			env->DeleteLocalRef(cls);
 			if (env->ExceptionCheck())
@@ -116,12 +116,14 @@ public:
 		}
 	}
 
-	Options options(int threads)
+	Options options(int threads, int hunk = 0, std::string codecs = {})
 	{
 		Options opt;
 		opt.threads = threads;
+		opt.hunk_bytes = unsigned(hunk > 0 ? hunk : 0);
+		opt.codecs = std::move(codecs);
 		opt.cancel = &g_cancel;
-		opt.progress_interval_ms = 200;
+		opt.progress_interval_ms = 250; // ~4 atualizações/s: suficiente para a interface
 		opt.progress = [this](Progress const &p) { on_progress(p); };
 		opt.log = [this](std::string const &m) { on_log(m); };
 		return opt;
@@ -152,7 +154,7 @@ private:
 		if (m_listener && m_onProgress)
 		{
 			m_env->CallVoidMethod(m_listener, m_onProgress, jint(p.stage), jdouble(p.fraction), jdouble(p.ratio),
-					jlong(p.done), jlong(p.total));
+					jlong(p.done), jlong(p.total), jlong(p.written));
 			check_exception();
 		}
 	}
@@ -219,12 +221,14 @@ Java_com_conversorchd_nativebridge_NativeChd_cancel(JNIEnv *, jclass)
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_conversorchd_nativebridge_NativeChd_convertDvd(JNIEnv *env, jclass, jint inFd, jint outFd, jint threads, jobject listener)
+Java_com_conversorchd_nativebridge_NativeChd_convertDvd(JNIEnv *env, jclass, jint inFd, jint outFd, jint threads,
+		jint hunk, jstring codecs, jobject listener)
 {
 	g_cancel.store(false);
 	ListenerBridge bridge(env, listener);
-	ALOGI("convertDvd in=%d out=%d threads=%d", inFd, outFd, threads);
-	Result const r = convert_dvd(inFd, outFd, bridge.options(threads));
+	std::string const cs = to_std(env, codecs);
+	ALOGI("convertDvd in=%d out=%d threads=%d hunk=%d codecs=%s", inFd, outFd, threads, hunk, cs.c_str());
+	Result const r = convert_dvd(inFd, outFd, bridge.options(threads, hunk, cs));
 	bridge.flush_logs();
 	ALOGI("convertDvd resultado=%d %s", int(r.code), r.message.c_str());
 	return to_j(env, result_json(r));
@@ -232,7 +236,7 @@ Java_com_conversorchd_nativebridge_NativeChd_convertDvd(JNIEnv *env, jclass, jin
 
 JNIEXPORT jstring JNICALL
 Java_com_conversorchd_nativebridge_NativeChd_convertCd(JNIEnv *env, jclass, jstring tocPath, jobjectArray trackPaths,
-		jintArray trackFds, jint outFd, jint threads, jobject listener)
+		jintArray trackFds, jint outFd, jint threads, jint hunk, jstring codecs, jobject listener)
 {
 	g_cancel.store(false);
 	ListenerBridge bridge(env, listener);
@@ -254,19 +258,20 @@ Java_com_conversorchd_nativebridge_NativeChd_convertCd(JNIEnv *env, jclass, jstr
 			env->DeleteLocalRef(js);
 		}
 	}
-	ALOGI("convertCd toc=%s trilhas=%d out=%d threads=%d", path.c_str(), int(n), outFd, threads);
-	Result const r = convert_cd(path, tracks, outFd, bridge.options(threads));
+	std::string const cs = to_std(env, codecs);
+	ALOGI("convertCd toc=%s trilhas=%d out=%d threads=%d hunk=%d codecs=%s", path.c_str(), int(n), outFd, threads, hunk, cs.c_str());
+	Result const r = convert_cd(path, tracks, outFd, bridge.options(threads, hunk, cs));
 	bridge.flush_logs();
 	ALOGI("convertCd resultado=%d %s", int(r.code), r.message.c_str());
 	return to_j(env, result_json(r));
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_conversorchd_nativebridge_NativeChd_verify(JNIEnv *env, jclass, jint fd, jobject listener)
+Java_com_conversorchd_nativebridge_NativeChd_verify(JNIEnv *env, jclass, jint fd, jint threads, jobject listener)
 {
 	g_cancel.store(false);
 	ListenerBridge bridge(env, listener);
-	Result const r = verify(fd, bridge.options(1));
+	Result const r = verify(fd, bridge.options(threads));
 	bridge.flush_logs();
 	ALOGI("verify resultado=%d %s", int(r.code), r.message.c_str());
 	return to_j(env, result_json(r));

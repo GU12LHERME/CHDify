@@ -5,8 +5,11 @@ package com.conversorchd.nativebridge
  * Os métodos são invocados por nome via JNI: não renomear.
  */
 interface NativeListener {
-    /** stage: 0 = compressão, 1 = verificação. fraction: 0..1. */
-    fun onProgress(stage: Int, fraction: Double, ratio: Double, done: Long, total: Long)
+    /**
+     * stage: 0 = compressão, 1 = verificação. fraction: 0..1.
+     * written: bytes já gravados no CHD (tamanho comprimido até o momento; 0 na verificação).
+     */
+    fun onProgress(stage: Int, fraction: Double, ratio: Double, done: Long, total: Long, written: Long)
 
     fun onLog(message: String)
 }
@@ -35,8 +38,11 @@ object NativeChd {
     /** Solicita o cancelamento da operação em andamento. */
     @JvmStatic external fun cancel()
 
-    /** ISO (setores de 2048 bytes) -> CHD de DVD. Equivale a "chdman createdvd". */
-    @JvmStatic external fun convertDvd(inFd: Int, outFd: Int, threads: Int, listener: NativeListener?): String
+    /**
+     * ISO (setores de 2048 bytes) -> CHD de DVD. Equivale a "chdman createdvd".
+     * hunkBytes = 0 e codecs vazio usam os padrões do chdman.
+     */
+    @JvmStatic external fun convertDvd(inFd: Int, outFd: Int, threads: Int, hunkBytes: Int, codecs: String, listener: NativeListener?): String
 
     /** CUE/GDI/ISO -> CHD de CD. Equivale a "chdman createcd". */
     @JvmStatic external fun convertCd(
@@ -45,9 +51,11 @@ object NativeChd {
         trackFds: IntArray,
         outFd: Int,
         threads: Int,
+        hunkBytes: Int,
+        codecs: String,
         listener: NativeListener?,
     ): String
 
-    /** Verificação completa do CHD. Equivale a "chdman verify". */
-    @JvmStatic external fun verify(fd: Int, listener: NativeListener?): String
+    /** Verificação completa do CHD (equivale a "chdman verify"), com descompressão em paralelo. */
+    @JvmStatic external fun verify(fd: Int, threads: Int, listener: NativeListener?): String
 }

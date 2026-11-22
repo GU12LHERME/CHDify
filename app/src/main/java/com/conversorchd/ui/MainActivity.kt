@@ -30,6 +30,9 @@ import android.widget.Toast
 import com.conversorchd.App
 import com.conversorchd.R
 import com.conversorchd.core.Analyzer
+import com.conversorchd.core.CompressionParams
+import com.conversorchd.core.CpuInfo
+import com.conversorchd.core.Profile
 import com.conversorchd.core.DiscMode
 import com.conversorchd.core.Format
 import com.conversorchd.core.InputFile
@@ -65,8 +68,19 @@ class MainActivity : Activity(), JobCard.Actions {
     private lateinit var progStage: TextView
     private lateinit var progBar: ProgressBar
     private lateinit var progPercent: TextView
-    private lateinit var progStats: TextView
-    private lateinit var progSizes: TextView
+    private lateinit var statSpeed: TextView
+    private lateinit var statElapsed: TextView
+    private lateinit var statRemaining: TextView
+    private lateinit var statOriginal: TextView
+    private lateinit var statCompressed: TextView
+    private lateinit var statSaved: TextView
+    private lateinit var profileBox: LinearLayout
+    private lateinit var profileHint: TextView
+    private lateinit var advancedBox: LinearLayout
+    private lateinit var advancedToggle: Button
+    private lateinit var dvdHunkButton: Button
+    private lateinit var cdHunkButton: Button
+    private var focusAfterRefresh: Pair<Long, String>? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -115,11 +129,11 @@ class MainActivity : Activity(), JobCard.Actions {
     private fun buildLayout() {
         root.removeAllViews()
         cards.clear()
-        val pad = Ui.dp(this, 16)
+        val pad = Ui.dp(this, 12)
 
-        val header = Ui.column(this, 2).apply {
-            addView(Ui.text(this@MainActivity, getString(R.string.app_name), 24f, Ui.ON_SURFACE, bold = true))
-            addView(Ui.text(this@MainActivity, getString(R.string.subtitle), 13f, Ui.ON_SURFACE_VAR))
+        val header = Ui.column(this, 0).apply {
+            addView(Ui.text(this@MainActivity, getString(R.string.app_name), 20f, Ui.ON_SURFACE, bold = true))
+            addView(Ui.text(this@MainActivity, getString(R.string.subtitle), 12f, Ui.ON_SURFACE_VAR))
         }
         val actions = buildActionsCard()
         val progress = buildProgressCard()
@@ -127,11 +141,11 @@ class MainActivity : Activity(), JobCard.Actions {
         val queue = buildQueue()
 
         if (isWide()) {
-            val left = Ui.column(this, 12).apply {
+            val left = Ui.column(this, 8).apply {
                 setPadding(pad, pad, pad / 2, pad)
                 addView(header); addView(actions); addView(progress); addView(controls)
             }
-            val right = Ui.column(this, 12).apply {
+            val right = Ui.column(this, 8).apply {
                 setPadding(pad / 2, pad, pad, pad)
                 addView(queue)
             }
@@ -142,7 +156,7 @@ class MainActivity : Activity(), JobCard.Actions {
             }
             root.addView(row, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         } else {
-            val col = Ui.column(this, 12).apply {
+            val col = Ui.column(this, 8).apply {
                 setPadding(pad, pad, pad, pad)
                 addView(header); addView(actions); addView(progress); addView(controls); addView(queue)
             }
@@ -160,10 +174,10 @@ class MainActivity : Activity(), JobCard.Actions {
 
     private fun buildActionsCard(): View {
         val card = Ui.card(this)
-        val col = Ui.column(this, 10)
+        val col = Ui.column(this, 8)
         addFilesButton = Ui.button(this, getString(R.string.action_add_files), Ui.Style.TONAL) { pickFiles() }.apply { tag = "add-files" }
         val addFolder = Ui.button(this, getString(R.string.action_add_folder), Ui.Style.TONAL) { pickInputFolder() }.apply { tag = "add-folder" }
-        col.addView(Ui.row(this, 10).apply {
+        col.addView(Ui.row(this, 8).apply {
             addView(addFilesButton, Ui.weighted())
             addView(addFolder, Ui.weighted())
         }, Ui.lp())
@@ -173,45 +187,88 @@ class MainActivity : Activity(), JobCard.Actions {
             Ui.singleLine(this)
         }
         col.addView(destButton, Ui.lp())
+
+        // perfil de compactação
+        col.addView(Ui.label(this, getString(R.string.profile_label)), Ui.lp().apply { topMargin = Ui.dp(this@MainActivity, 4) })
+        profileBox = LinearLayout(this)
+        col.addView(profileBox, Ui.lp())
+        profileHint = Ui.text(this, "", 12f, Ui.ON_SURFACE_VAR)
+        col.addView(profileHint)
+
         verifySwitch = Switch(this).apply {
             tag = "verify"
             text = getString(R.string.option_verify)
             setTextColor(Ui.ON_SURFACE)
-            textSize = 15f
+            textSize = 14f
             isChecked = prefs.verifyAfter
-            minHeight = Ui.dp(this@MainActivity, 52)
-            background = Ui.stateBackground(this@MainActivity, Ui.SURFACE, 0, 16, Ui.withAlpha(Ui.PRIMARY, 0.2f))
-            setPadding(Ui.dp(this@MainActivity, 12), 0, Ui.dp(this@MainActivity, 12), 0)
+            minHeight = Ui.dp(this@MainActivity, 44)
+            background = Ui.stateBackground(this@MainActivity, Ui.SURFACE, 0, 10, Ui.withAlpha(Ui.PRIMARY, 0.2f))
+            setPadding(Ui.dp(this@MainActivity, 4), 0, Ui.dp(this@MainActivity, 4), 0)
             setOnCheckedChangeListener { _, checked -> prefs.verifyAfter = checked }
         }
         col.addView(verifySwitch, Ui.lp())
-        threadsButton = Ui.button(this, "", Ui.Style.OUTLINED) { cycleThreads() }.apply {
-            tag = "threads"
+
+        // opções avançadas (recolhidas por padrão)
+        advancedToggle = Ui.smallButton(this, "", Ui.Style.TEXT) { toggleAdvanced() }.apply {
+            tag = "advanced"
             gravity = Gravity.CENTER_VERTICAL or Gravity.START
         }
-        col.addView(threadsButton, Ui.lp())
+        col.addView(advancedToggle, Ui.lp())
+        advancedBox = Ui.column(this, 6)
+        threadsButton = Ui.smallButton(this, "", Ui.Style.OUTLINED) { cycleThreads() }.apply {
+            tag = "threads"; gravity = Gravity.CENTER_VERTICAL or Gravity.START
+        }
+        dvdHunkButton = Ui.smallButton(this, "", Ui.Style.OUTLINED) { cycleHunk(DiscMode.DVD) }.apply {
+            tag = "hunk-dvd"; gravity = Gravity.CENTER_VERTICAL or Gravity.START
+        }
+        cdHunkButton = Ui.smallButton(this, "", Ui.Style.OUTLINED) { cycleHunk(DiscMode.CD) }.apply {
+            tag = "hunk-cd"; gravity = Gravity.CENTER_VERTICAL or Gravity.START
+        }
+        advancedBox.addView(threadsButton, Ui.lp())
+        advancedBox.addView(dvdHunkButton, Ui.lp())
+        advancedBox.addView(cdHunkButton, Ui.lp())
+        advancedBox.addView(Ui.text(this, getString(R.string.advanced_note), 11f, Ui.ON_SURFACE_VAR))
+        col.addView(advancedBox, Ui.lp())
+
         card.addView(col, Ui.lp())
         updateOptionLabels()
         return card
     }
 
+    private fun stat(label: String): Pair<View, TextView> {
+        val value = Ui.singleLine(Ui.text(this, "—", 14f, Ui.ON_SURFACE, bold = true), middle = false)
+        val box = Ui.column(this, 0).apply {
+            addView(Ui.label(this@MainActivity, label))
+            addView(value)
+        }
+        return box to value
+    }
+
     private fun buildProgressCard(): View {
         val card = Ui.card(this)
-        val col = Ui.column(this, 8)
-        progName = Ui.singleLine(Ui.text(this, "", 16f, Ui.ON_SURFACE, bold = true))
-        progStage = Ui.text(this, "", 13f, Ui.PRIMARY)
+        val col = Ui.column(this, 6)
+        progName = Ui.singleLine(Ui.text(this, "", 14f, Ui.ON_SURFACE, bold = true))
+        progStage = Ui.text(this, "", 12f, Ui.PRIMARY)
         progBar = Ui.progressBar(this)
-        progPercent = Ui.text(this, "", 32f, Ui.ON_SURFACE, bold = true)
-        progStats = Ui.text(this, "", 13f, Ui.ON_SURFACE_VAR).apply { typeface = Typeface.MONOSPACE }
-        progSizes = Ui.text(this, "", 13f, Ui.ON_SURFACE_VAR)
-        col.addView(progName)
-        col.addView(progStage)
-        col.addView(progBar, Ui.lp(h = Ui.dp(this, 10)))
-        col.addView(Ui.row(this, 16).apply {
+        progPercent = Ui.text(this, "", 26f, Ui.ON_SURFACE, bold = true)
+        col.addView(Ui.row(this, 10).apply {
+            addView(Ui.column(this@MainActivity, 0).apply {
+                addView(progName)
+                addView(progStage)
+            }, Ui.weighted())
             addView(progPercent)
-            addView(progStats, Ui.weighted())
         }, Ui.lp())
-        col.addView(progSizes)
+        col.addView(progBar, Ui.lp(h = Ui.dp(this, 6)))
+        val (s1, v1) = stat(getString(R.string.stat_speed))
+        val (s2, v2) = stat(getString(R.string.stat_elapsed))
+        val (s3, v3) = stat(getString(R.string.stat_remaining))
+        val (s4, v4) = stat(getString(R.string.stat_original))
+        val (s5, v5) = stat(getString(R.string.stat_compressed))
+        val (s6, v6) = stat(getString(R.string.stat_saved))
+        statSpeed = v1; statElapsed = v2; statRemaining = v3
+        statOriginal = v4; statCompressed = v5; statSaved = v6
+        col.addView(Ui.row(this, 8).apply { addView(s1, Ui.weighted()); addView(s2, Ui.weighted()); addView(s3, Ui.weighted()) }, Ui.lp())
+        col.addView(Ui.row(this, 8).apply { addView(s4, Ui.weighted()); addView(s5, Ui.weighted()); addView(s6, Ui.weighted()) }, Ui.lp())
         card.addView(col, Ui.lp())
         return card
     }
@@ -220,22 +277,22 @@ class MainActivity : Activity(), JobCard.Actions {
         startButton = Ui.button(this, getString(R.string.action_start), Ui.Style.FILLED) { startConversion() }.apply { tag = "start" }
         cancelButton = Ui.button(this, getString(R.string.action_cancel), Ui.Style.OUTLINED) { confirmCancel() }.apply { tag = "cancel" }
         return Ui.row(this, 10).apply {
-            addView(startButton, LinearLayout.LayoutParams(0, Ui.dp(this@MainActivity, 64), 1.4f))
-            addView(cancelButton, LinearLayout.LayoutParams(0, Ui.dp(this@MainActivity, 64), 1f))
+            addView(startButton, LinearLayout.LayoutParams(0, Ui.dp(this@MainActivity, 52), 1.4f))
+            addView(cancelButton, LinearLayout.LayoutParams(0, Ui.dp(this@MainActivity, 52), 1f))
         }
     }
 
     private fun buildQueue(): View {
-        val col = Ui.column(this, 10)
-        queueTitle = Ui.text(this, "", 18f, Ui.ON_SURFACE, bold = true)
+        val col = Ui.column(this, 8)
+        queueTitle = Ui.text(this, "", 15f, Ui.ON_SURFACE, bold = true)
         clearButton = Ui.smallButton(this, getString(R.string.action_clear_finished), Ui.Style.TEXT) { clearFinished() }.apply { tag = "clear" }
         col.addView(Ui.row(this, 8).apply {
             addView(queueTitle, Ui.weighted())
             addView(clearButton)
         }, Ui.lp())
-        emptyQueue = Ui.text(this, getString(R.string.queue_empty), 14f, Ui.ON_SURFACE_VAR)
+        emptyQueue = Ui.text(this, getString(R.string.queue_empty), 13f, Ui.ON_SURFACE_VAR)
         col.addView(emptyQueue)
-        queueList = Ui.column(this, 10)
+        queueList = Ui.column(this, 6)
         col.addView(queueList, Ui.lp())
         return col
     }
@@ -247,28 +304,88 @@ class MainActivity : Activity(), JobCard.Actions {
         destButton.text = if (tree != null && Storage.hasTreePermission(this, tree))
             getString(R.string.dest_label, Storage.treeDisplayName(contentResolver, tree))
         else getString(R.string.dest_choose)
-        val cores = Runtime.getRuntime().availableProcessors()
+
         val t = prefs.threads
-        threadsButton.text = if (t <= 0) getString(R.string.threads_auto, cores) else resources.getQuantityString(R.plurals.threads_n, t, t)
+        val clusters = CpuInfo.describeClusters()
+        threadsButton.text = if (t <= 0) {
+            if (clusters.isEmpty()) getString(R.string.threads_auto, CpuInfo.cores)
+            else getString(R.string.threads_auto_clusters, CpuInfo.cores, clusters)
+        } else resources.getQuantityString(R.plurals.threads_n, t, t)
+        dvdHunkButton.text = getString(R.string.hunk_dvd, hunkLabel(DiscMode.DVD, prefs.dvdHunk))
+        cdHunkButton.text = getString(R.string.hunk_cd, hunkLabel(DiscMode.CD, prefs.cdHunk))
+
+        // seletor de perfil (recriado só quando muda)
+        val p = prefs.profile
+        val focusedTag = profileBox.findFocus()?.tag
+        profileBox.removeAllViews()
+        val labels = listOf(getString(R.string.profile_fast), getString(R.string.profile_balanced), getString(R.string.profile_max))
+        profileBox.addView(Ui.segmented(this, labels, p.ordinal, "profile-") { i -> setProfile(Profile.values()[i]) }, Ui.lp())
+        if (focusedTag != null) profileBox.findViewWithTag<View>(focusedTag)?.requestFocus()
+        val dvd = CompressionParams.of(p, DiscMode.DVD, prefs.dvdHunk, prefs.cdHunk).describe(DiscMode.DVD)
+        val cd = CompressionParams.of(p, DiscMode.CD, prefs.dvdHunk, prefs.cdHunk).describe(DiscMode.CD)
+        val hint = when (p) {
+            Profile.FAST -> R.string.profile_fast_hint
+            Profile.BALANCED -> R.string.profile_balanced_hint
+            Profile.MAX -> R.string.profile_max_hint
+        }
+        profileHint.text = getString(hint) + "\n" + getString(R.string.profile_params, dvd, cd)
+
+        val open = prefs.advancedOpen
+        advancedBox.visibility = if (open) View.VISIBLE else View.GONE
+        advancedToggle.text = getString(if (open) R.string.advanced_hide else R.string.advanced_show)
+    }
+
+    private fun hunkLabel(mode: DiscMode, bytes: Int): String = when {
+        bytes <= 0 -> getString(R.string.hunk_profile)
+        mode == DiscMode.CD -> getString(R.string.hunk_frames, bytes / CompressionParams.CD_FRAME)
+        else -> "${bytes / 1024} KiB"
+    }
+
+    private fun setProfile(p: Profile) {
+        if (prefs.profile == p) return
+        prefs.profile = p
+        updateOptionLabels()
+    }
+
+    private fun toggleAdvanced() {
+        prefs.advancedOpen = !prefs.advancedOpen
+        updateOptionLabels()
+    }
+
+    private fun cycleHunk(mode: DiscMode) {
+        val list = if (mode == DiscMode.DVD) CompressionParams.DVD_HUNKS else CompressionParams.CD_HUNKS
+        val cur = if (mode == DiscMode.DVD) prefs.dvdHunk else prefs.cdHunk
+        val next = list[(list.indexOf(cur).coerceAtLeast(0) + 1) % list.size]
+        if (mode == DiscMode.DVD) prefs.dvdHunk = next else prefs.cdHunk = next
+        updateOptionLabels()
     }
 
     private fun refresh() {
         if (!::queueList.isInitialized) return
         val jobs = JobRepository.snapshot()
 
-        // fila: adiciona/remove/atualiza cartões sem recriar os existentes
+        // fila: adiciona/remove/reordena/atualiza cartões sem recriar os existentes
         val ids = jobs.map { it.id }.toSet()
         cards.keys.filter { it !in ids }.forEach { id -> cards.remove(id)?.let { queueList.removeView(it.view) } }
         jobs.forEachIndexed { index, job ->
-            val card = cards.getOrPut(job.id) { JobCard(this, this).also { queueList.addView(it.view, index, Ui.lp()) } }
-            card.bind(job)
+            val card = cards.getOrPut(job.id) { JobCard(this, this) }
+            if (queueList.getChildAt(index) !== card.view) {
+                (card.view.parent as? ViewGroup)?.removeView(card.view)
+                queueList.addView(card.view, index, Ui.lp())
+            }
+            card.bind(job, index, jobs.size)
+        }
+        focusAfterRefresh?.let { (id, tag) ->
+            focusAfterRefresh = null
+            val v = cards[id]?.view
+            (v?.findViewWithTag<View>(tag) ?: v?.findViewWithTag<View>("log"))?.requestFocus()
         }
         emptyQueue.visibility = if (jobs.isEmpty()) View.VISIBLE else View.GONE
         val ready = jobs.count { it.state == JobState.READY }
         queueTitle.text = getString(R.string.queue_title, jobs.size)
         clearButton.visibility = if (jobs.any { it.isFinished }) View.VISIBLE else View.GONE
 
-        // progresso
+        // painel de progresso
         val current = JobRepository.current()
         val processing = JobRepository.processing
         startButton.isEnabled = !processing && ready > 0
@@ -277,30 +394,52 @@ class MainActivity : Activity(), JobCard.Actions {
         if (current != null) {
             progName.text = current.displayName
             val modeText = getString(if (current.mode == DiscMode.CD) R.string.mode_cd else R.string.mode_dvd)
+            val profileText = when (current.profile) {
+                Profile.FAST -> getString(R.string.profile_fast)
+                Profile.MAX -> getString(R.string.profile_max)
+                else -> getString(R.string.profile_balanced)
+            }
             progStage.text = getString(
-                if (current.state == JobState.VERIFYING) R.string.stage_verifying else R.string.stage_compressing, modeText,
+                if (current.state == JobState.VERIFYING) R.string.stage_verifying else R.string.stage_compressing,
+                "$modeText · $profileText",
             )
             progBar.progress = (current.fraction * 1000).toInt()
             progPercent.text = Format.percent(current.fraction)
-            val now = SystemClock.elapsedRealtime()
-            val elapsed = (now - current.startedAt) / 1000
+            val elapsed = (SystemClock.elapsedRealtime() - current.startedAt) / 1000
             val remaining = if (current.speedBps > 0) ((current.bytesTotal - current.bytesDone) / current.speedBps).toLong() else -1L
-            progStats.text = getString(R.string.stats_line, Format.speed(current.speedBps), Format.duration(elapsed), Format.duration(remaining))
-            val estimate = if (current.state == JobState.RUNNING && current.fraction > 0.02)
-                getString(R.string.sizes_estimate, Format.bytes(current.inputBytes), Format.bytes((current.inputBytes * current.ratio).toLong()))
-            else getString(R.string.sizes_input, Format.bytes(current.inputBytes))
-            progSizes.text = estimate
+            statSpeed.text = Format.speed(current.speedBps)
+            statElapsed.text = Format.duration(elapsed)
+            statRemaining.text = Format.duration(remaining)
+            statOriginal.text = Format.bytes(current.inputBytes)
+            if (current.state == JobState.VERIFYING) {
+                statCompressed.text = Format.bytes(current.outputBytes)
+                showSaved(current.inputBytes, current.outputBytes, estimate = false)
+            } else {
+                statCompressed.text = Format.bytes(current.bytesWritten)
+                // estimativa do tamanho final a partir da taxa atual
+                if (current.fraction > 0.02) showSaved(current.inputBytes, (current.inputBytes * current.ratio).toLong(), estimate = true)
+                else statSaved.text = "—"
+            }
         } else {
             val done = jobs.filter { it.state == JobState.DONE }
             progName.text = getString(if (processing) R.string.idle_starting else R.string.idle_title)
             progStage.text = if (done.isEmpty()) getString(R.string.idle_hint) else getString(R.string.idle_done, done.size)
-            progBar.progress = 0
+            progBar.progress = if (done.isNotEmpty() && !jobs.any { it.state == JobState.READY }) 1000 else 0
             progPercent.text = ""
-            progStats.text = ""
+            statSpeed.text = "—"; statElapsed.text = "—"; statRemaining.text = "—"
             val inSum = done.sumOf { it.inputBytes }
             val outSum = done.sumOf { it.outputBytes }
-            progSizes.text = if (done.isEmpty()) "" else getString(R.string.sizes_total, Format.bytes(inSum), Format.bytes(outSum))
+            statOriginal.text = if (done.isEmpty()) "—" else Format.bytes(inSum)
+            statCompressed.text = if (done.isEmpty()) "—" else Format.bytes(outSum)
+            if (done.isEmpty()) statSaved.text = "—" else showSaved(inSum, outSum, estimate = false)
         }
+    }
+
+    private fun showSaved(input: Long, output: Long, estimate: Boolean) {
+        val saved = input - output
+        val pct = if (input > 0) Format.percent(saved.toDouble() / input) else "—"
+        statSaved.text = (if (estimate) "≈ " else "") + "${Format.bytes(saved)} ($pct)"
+        statSaved.setTextColor(if (saved >= 0) Ui.SUCCESS else Ui.WARN)
     }
 
     // ================================================================== ações
@@ -463,6 +602,11 @@ class MainActivity : Activity(), JobCard.Actions {
 
     override fun retry(job: Job) = JobRepository.retry(job.id)
 
+    override fun move(job: Job, delta: Int) {
+        focusAfterRefresh = job.id to (if (delta < 0) "up" else "down")
+        JobRepository.move(job.id, delta)
+    }
+
     override fun showLog(job: Job) {
         val tv = Ui.text(this, job.logText().ifEmpty { getString(R.string.log_empty) }, 12f, Ui.ON_SURFACE).apply {
             typeface = Typeface.MONOSPACE
@@ -487,7 +631,8 @@ class MainActivity : Activity(), JobCard.Actions {
 
     /**
      * Gamepads (XInput e similares): A confirma, B volta, Start inicia,
-     * X adiciona arquivos, Y cancela (com confirmação), Select abre o log do item atual.
+     * X adiciona arquivos, Y cancela (com confirmação), Select abre o log do item atual,
+     * L1/R1 trocam o perfil de compactação.
      * O D-pad e o analógico navegam pelo foco padrão do Android.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -511,11 +656,13 @@ class MainActivity : Activity(), JobCard.Actions {
                     (JobRepository.current() ?: JobRepository.snapshot().lastOrNull())?.let { showLog(it) }
                     return true
                 }
+                KeyEvent.KEYCODE_BUTTON_L1 -> { setProfile(Profile.values()[(prefs.profile.ordinal + 2) % 3]); return true }
+                KeyEvent.KEYCODE_BUTTON_R1 -> { setProfile(Profile.values()[(prefs.profile.ordinal + 1) % 3]); return true }
             }
         } else if (event.action == KeyEvent.ACTION_DOWN) {
             when (event.keyCode) {
-                KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BUTTON_X,
-                KeyEvent.KEYCODE_BUTTON_Y, KeyEvent.KEYCODE_BUTTON_SELECT -> return true
+                KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BUTTON_X, KeyEvent.KEYCODE_BUTTON_Y,
+                KeyEvent.KEYCODE_BUTTON_SELECT, KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_BUTTON_R1 -> return true
             }
         }
         return super.dispatchKeyEvent(event)

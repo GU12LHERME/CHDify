@@ -92,6 +92,14 @@ class ConversionService : Service() {
     }
 
     private fun processQueue() {
+        // Prioridade um pouco abaixo do normal: a interface continua fluida e as
+        // threads de compressão do MAME (criadas a partir desta) herdam o valor.
+        // Valores >= 10 (THREAD_PRIORITY_BACKGROUND) moveriam as threads para o
+        // grupo de segundo plano do Android, restrito aos núcleos de eficiência.
+        try {
+            android.os.Process.setThreadPriority(CONVERSION_PRIORITY)
+        } catch (e: Exception) {
+        }
         val prefs = Prefs(this)
         val runner = ConversionRunner(this, prefs) { job -> onJobUpdate(job) }
         var done = 0
@@ -240,6 +248,7 @@ class ConversionService : Service() {
 
     companion object {
         private const val TAG = "ConversorCHD"
+        private const val CONVERSION_PRIORITY = 4
         const val ACTION_START = "com.conversorchd.action.START"
         const val ACTION_CANCEL = "com.conversorchd.action.CANCEL"
         private const val CHANNEL_PROGRESS = "progresso"
