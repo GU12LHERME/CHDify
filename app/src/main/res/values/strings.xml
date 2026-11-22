@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Conversor CHD</string>
+    <string name="subtitle">ISO · CUE/BIN · GDI → CHD · núcleo chdman (MAME)</string>
+
+    <!-- ações -->
+    <string name="action_add_files">Adicionar arquivos</string>
+    <string name="action_add_folder">Adicionar pasta</string>
+    <string name="action_start">Iniciar conversão</string>
+    <string name="action_start_n">Iniciar conversão (%1$d)</string>
+    <string name="action_cancel">Cancelar</string>
+    <string name="action_clear_finished">Limpar concluídos</string>
+    <string name="action_retry">Tentar de novo</string>
+    <string name="action_log">Log</string>
+    <string name="action_remove">Remover</string>
+    <string name="action_copy">Copiar</string>
+    <string name="action_close">Fechar</string>
+
+    <!-- opções -->
+    <string name="dest_label">Destino: %1$s</string>
+    <string name="dest_choose">Escolher pasta de destino</string>
+    <string name="option_verify">Verificar integridade após converter</string>
+    <string name="threads_auto">Núcleos da CPU: automático (%1$d)</string>
+    <plurals name="threads_n">
+        <item quantity="one">Núcleos da CPU: %1$d</item>
+        <item quantity="other">Núcleos da CPU: %1$d</item>
+    </plurals>
+
+    <!-- progresso -->
+    <string name="stage_compressing">Comprimindo · %1$s</string>
+    <string name="stage_verifying">Verificando integridade · %1$s</string>
+    <string name="stats_line">Velocidade %1$s\nDecorrido  %2$s\nRestante   %3$s</string>
+    <string name="sizes_input">Tamanho original: %1$s</string>
+    <string name="sizes_estimate">Original %1$s → CHD estimado %2$s</string>
+    <string name="sizes_total">Total convertido: %1$s → %2$s</string>
+    <string name="idle_title">Nenhuma conversão em andamento</string>
+    <string name="idle_starting">Iniciando…</string>
+    <string name="idle_hint">Adicione arquivos ISO, CUE ou GDI e toque em Iniciar.</string>
+    <string name="idle_done">%1$d arquivo(s) convertido(s) nesta sessão.</string>
+
+    <!-- fila -->
+    <string name="queue_title">Fila (%1$d)</string>
+    <string name="queue_empty">A fila está vazia.</string>
+    <string name="kind_image">Imagem</string>
+    <string name="kind_cue">CUE · %1$d arquivo(s)</string>
+    <string name="kind_gdi">GDI · %1$d arquivo(s)</string>
+    <string name="mode_cd">CD</string>
+    <string name="mode_dvd">DVD</string>
+    <string name="state_analyzing">Analisando…</string>
+    <string name="state_ready">Pronto para converter</string>
+    <string name="state_blocked">Não pode ser convertido</string>
+    <string name="state_running">Convertendo · %1$s</string>
+    <string name="state_verifying">Verificando · %1$s</string>
+    <string name="state_done">Concluído: %1$s · %2$s (%3$s do original)</string>
+    <string name="state_verified">verificado ✓</string>
+    <string name="state_failed">Falhou</string>
+    <string name="state_cancelled">Cancelado</string>
+    <plurals name="tracks">
+        <item quantity="one">%1$d trilha</item>
+        <item quantity="other">%1$d trilhas</item>
+    </plurals>
+    <plurals name="audio_tracks">
+        <item quantity="one">%1$d de áudio</item>
+        <item quantity="other">%1$d de áudio</item>
+    </plurals>
+
+    <!-- análise -->
+    <string name="info_raw_sectors">setores de %1$s bytes</string>
+    <string name="info_psp">UMD de PSP: modo DVD (compatível com PPSSPP).</string>
+    <string name="info_exceeds_cd">maior que um CD</string>
+    <string name="warn_raw_no_cue">Imagem com setores brutos e sem .cue: será gravada como uma única trilha de dados. Se o disco tiver trilhas de áudio, converta a partir do .cue original.</string>
+    <string name="warn_no_fs">Nenhum sistema de arquivos ISO9660/UDF foi reconhecido. O arquivo pode não ser uma imagem de disco.</string>
+    <string name="warn_cd_from_iso">Uma ISO não contém informações de trilhas. O modo DVD preserva os dados integralmente; o modo CD gera uma única trilha de dados (MODE1) e só é adequado se o disco original não tinha áudio nem dados em modo 2.</string>
+    <string name="warn_ps2_small">Jogo de PS2 pequeno: o disco original pode ter sido um CD. A partir da ISO, o modo DVD preserva os dados; para recriar o CD fielmente, use o .cue/.bin original.</string>
+    <string name="warn_needs_cue">Discos de %1$s costumam ter trilhas de áudio ou dados em modo 2 que uma ISO de 2048 bytes não contém. O CHD resultante pode não funcionar: prefira o .cue/.bin original.</string>
+    <string name="warn_no_chd_support">Atenção: emuladores de %1$s em geral não leem CHD. O arquivo será criado em modo DVD.</string>
+    <string name="err_analysis">Falha ao analisar: %1$s</string>
+    <string name="err_open">Não foi possível abrir o arquivo.</string>
+    <string name="err_not_regular">O arquivo não é acessível diretamente (fluxo de rede ou nuvem). Copie-o para o armazenamento do aparelho.</string>
+    <string name="err_empty">O arquivo está vazio.</string>
+    <string name="err_layout">O tamanho do arquivo não corresponde a setores de 2048, 2336 ou 2352 bytes. Arquivo inválido ou corrompido.</string>
+    <string name="err_truncated">Imagem truncada: o sistema de arquivos declara %1$s, mas o arquivo tem %2$s. Faça uma nova cópia do arquivo.</string>
+    <string name="err_sheet_empty">A folha de trilhas está vazia ou não pôde ser lida.</string>
+    <string name="err_missing_tracks">Arquivos de trilha ausentes: %1$s. Selecione o .cue/.gdi junto com seus arquivos (seleção múltipla) ou use “Adicionar pasta”.</string>
+    <string name="err_sheet_invalid">Folha de trilhas inválida: %1$s</string>
+
+    <!-- conversão -->
+    <string name="msg_cancelled">Conversão cancelada. O arquivo parcial foi removido.</string>
+    <string name="err_no_destination">Escolha uma pasta de destino antes de converter.</string>
+    <string name="err_create_output">Não foi possível criar o arquivo de destino.</string>
+    <string name="err_invalid">Imagem inválida: %1$s</string>
+    <string name="err_no_space">Sem espaço de armazenamento no destino. O arquivo parcial foi removido.</string>
+    <string name="err_io">Erro de leitura/gravação: %1$s</string>
+    <string name="err_chd">Erro ao gravar o CHD: %1$s</string>
+    <string name="err_verify">Falha na verificação de integridade: %1$s</string>
+    <string name="err_generic">Erro: %1$s</string>
+    <string name="err_service">Não foi possível iniciar o serviço: %1$s</string>
+    <string name="err_no_picker">Nenhum gerenciador de arquivos disponível neste aparelho.</string>
+
+    <!-- avisos rápidos -->
+    <string name="toast_nothing_added">Nenhuma imagem compatível (.iso, .cue, .gdi, .img, .bin) foi encontrada.</string>
+    <plurals name="toast_ignored">
+        <item quantity="one">%1$d arquivo ignorado (formato não suportado).</item>
+        <item quantity="other">%1$d arquivos ignorados (formato não suportado).</item>
+    </plurals>
+    <string name="toast_nothing_ready">Não há itens prontos para converter.</string>
+    <string name="toast_choose_dest">Escolha a pasta onde os arquivos CHD serão salvos.</string>
+    <string name="toast_copied">Log copiado.</string>
+    <string name="log_empty">(sem registros)</string>
+
+    <!-- cancelamento -->
+    <string name="cancel_title">Cancelar conversão?</string>
+    <string name="cancel_message">A conversão atual será interrompida e o arquivo parcial apagado. Os itens restantes continuam na fila.</string>
+    <string name="cancel_confirm">Cancelar conversão</string>
+    <string name="cancel_keep">Continuar</string>
+
+    <!-- notificações -->
+    <string name="channel_progress">Progresso da conversão</string>
+    <string name="channel_result">Conversões concluídas</string>
+    <string name="notif_starting">Preparando conversão…</string>
+    <string name="notif_converting">Convertendo %1$s</string>
+    <string name="notif_verifying">Verificando %1$s</string>
+    <string name="notif_progress_line">%1$s · %2$s · resta %3$s</string>
+    <string name="notif_done_title">Fila concluída</string>
+    <string name="notif_done_text">%1$d concluído(s), %2$d com erro.</string>
+</resources>
