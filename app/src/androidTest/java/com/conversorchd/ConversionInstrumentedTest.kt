@@ -16,6 +16,12 @@ import com.conversorchd.core.ResultCodes
 import com.conversorchd.core.SourceKind
 import com.conversorchd.core.TrackRef
 import com.conversorchd.core.WorkDir
+import com.conversorchd.core.JobState
+import com.conversorchd.core.Operation
+import com.conversorchd.core.Deletion
+import com.conversorchd.core.DeleteState
+import com.conversorchd.core.Prefs
+import org.json.JSONObject
 import com.conversorchd.nativebridge.NativeChd
 import com.conversorchd.nativebridge.NativeListener
 import org.junit.After
@@ -135,7 +141,7 @@ class ConversionInstrumentedTest {
 
     @Test
     fun coreLoads() {
-        assertTrue(NativeChd.coreVersion().contains("ConversorCHD"))
+        assertTrue(NativeChd.coreVersion().contains("CHDify"))
     }
 
     @Test
@@ -188,8 +194,7 @@ class ConversionInstrumentedTest {
         assertTrue(a.error != null)
     }
 
-    @Test
-    fun cueWithAudioThroughWorkDir() {
+    private fun makeCueJob(): Triple<Job, File, File> {
         // trilha 1: dados MODE1/2352 (cabeçalho de sincronismo + 2048 + EDC/ECC zerado)
         val data = makeIso("t1src.iso", 400)
         val t1 = File(dir, "Jogo (Track 01).bin")
@@ -224,6 +229,12 @@ class ConversionInstrumentedTest {
                 "FILE \"Jogo (Track 02).bin\" BINARY\r\n  TRACK 02 AUDIO\r\n    INDEX 00 00:00:00\r\n    INDEX 01 00:02:00\r\n",
         )
         val job = Job(3, SourceKind.CUE, input(cue), listOf(TrackRef(t1.name, input(t1)), TrackRef(t2.name, input(t2))))
+        return Triple(job, t1, t2)
+    }
+
+    @Test
+    fun cueWithAudioThroughWorkDir() {
+        val job = makeCueJob().first
 
         val a = Analyzer.analyze(ctx, job)
         assertEquals(a.error, null, a.error)
@@ -301,5 +312,140 @@ class ConversionInstrumentedTest {
         assertEquals(size, r.logicalBytes)
         assertTrue(done.get())
         assertEquals(sha1(iso), r.rawSha1)
+    }
+
+    // ------------------------------------------------------------------ extração e recompactação
+
+    private fun rw(f: File) = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_WRITE or ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE)
+    private fun ro(f: File) = ParcelFileDescriptor.open(f, ParcelFileDescriptor.MODE_READ_ONLY)
+
+    @Test
+    fun dvdChdExtractsToIdenticalIso() {
+        val iso = makeIso("ext.iso", 5000, seed = 11)
+        val chd = File(dir, "ext.chd")
+        assertEquals(ResultCodes.OK, convertDvd(iso, chd).code)
+        val back = File(dir, "ext-volta.iso")
+        val rec = Recorder()
+        val r = ro(chd).use { i -> rw(back).use { o -> NativeResult.parse(NativeChd.extractDvd(i.fd, o.fd, 0, rec)) } }
+        assertEquals(r.message, ResultCodes.OK, r.code)
+        assertTrue("progresso de extração não reportado", rec.calls > 0)
+        assertEquals(sha1(iso), sha1(back))
+        assertEquals(iso.length(), back.length())
+    }
+
+    @Test
+    fun recompressKeepsDataAndVerifies() {
+        val iso = makeIso("rec.iso", 6000, seed = 12)
+        val chd = File(dir, "rec.chd")
+        assertEquals(ResultCodes.OK, convertDvd(iso, chd, params = CompressionParams.of(Profile.FAST, DiscMode.DVD)).code)
+        val max = CompressionParams.of(Profile.MAX, DiscMode.DVD)
+        val out = File(dir, "rec-max.chd")
+        val r = ro(chd).use { i -> rw(out).use { o -> NativeResult.parse(NativeChd.recompress(i.fd, o.fd, 0, max.hunkBytes, max.codecs, null)) } }
+        assertEquals(r.message, ResultCodes.OK, r.code)
+        assertEquals(sha1(iso), r.rawSha1)
+        val v = verify(out)
+        assertEquals(v.message, ResultCodes.OK, v.code)
+        assertEquals(sha1(iso), v.rawSha1)
+    }
+
+    @Test
+    fun cdChdExtractsToCueAndBinsMatchingOriginalTracks() {
+        val (job, t1, t2) = makeCueJob()
+        val chd = File(dir, "cd.chd")
+        val r = WorkDir.prepareCd(ctx, job).use { p ->
+            rw(chd).use { out -> NativeResult.parse(NativeChd.convertCd(p.tocPath, p.trackPaths, p.trackFds, out.fd, 0, 0, "", null)) }
+        }
+        assertEquals(r.message, ResultCodes.OK, r.code)
+
+        val plan = ro(chd).use { JSONObject(NativeChd.planCdExtract(it.fd, "Jogo")) }
+        assertTrue(plan.toString(), plan.optBoolean("ok"))
+        assertEquals("cue", plan.getString("sheetExt"))
+        val names = plan.getJSONArray("files").let { a -> (0 until a.length()).map { a.getString(it) } }
+        assertEquals(listOf("Jogo (Track 1).bin", "Jogo (Track 2).bin"), names)
+
+        val outs = names.map { File(dir, "x-$it") }
+        val pfds = outs.map { rw(it) }
+        val e = try {
+            ro(chd).use { NativeResult.parse(NativeChd.extractCd(it.fd, "Jogo", pfds.map { p -> p.fd }.toIntArray(), null)) }
+        } finally { pfds.forEach { it.close() } }
+        assertEquals(e.message, ResultCodes.OK, e.code)
+        assertEquals(sha1(t1), sha1(outs[0]))
+        assertEquals(sha1(t2), sha1(outs[1]))
+        assertTrue(plan.getString("sheet").contains("TRACK 02 AUDIO"))
+    }
+
+    @Test
+    fun extractingDvdAsCdIsRejected() {
+        val iso = makeIso("d.iso", 1000)
+        val chd = File(dir, "d.chd")
+        assertEquals(ResultCodes.OK, convertDvd(iso, chd).code)
+        val plan = ro(chd).use { JSONObject(NativeChd.planCdExtract(it.fd, "d")) }
+        assertTrue(!plan.optBoolean("ok"))
+        val info = ro(chd).use { NativeChd.chdInfo(it.fd) }
+        assertTrue(info, info.contains("\"type\":\"dvd\""))
+    }
+
+    // ------------------------------------------------------------------ fila, persistência e exclusão segura
+
+    @Test
+    fun jobJsonRoundTrip() {
+        val iso = makeIso("j.iso", 100)
+        val job = Job(42, SourceKind.CHD, input(iso), emptyList(), Operation.RECOMPRESS)
+        job.state = JobState.DONE
+        job.outputName = "j.chd"
+        job.outputBytes = 1234
+        job.verified = true
+        job.profile = Profile.MAX
+        job.deleteState = DeleteState.PENDING_CONFIRM
+        job.deleteCandidates = listOf(input(iso))
+        job.m3uGroup = "Jogo"
+        val back = Job.fromJson(JSONObject(job.toJson().toString()))
+        assertEquals(42L, back.id)
+        assertEquals(Operation.RECOMPRESS, back.operation)
+        assertEquals(JobState.DONE, back.state)
+        assertEquals(1234L, back.outputBytes)
+        assertTrue(back.verified)
+        assertEquals(Profile.MAX, back.profile)
+        assertEquals(DeleteState.PENDING_CONFIRM, back.deleteState)
+        assertEquals(1, back.deleteCandidates.size)
+        assertEquals("Jogo", back.m3uGroup)
+    }
+
+    @Test
+    fun deletionNeverAllowedWithoutVerificationOrFolder() {
+        val prefs = Prefs(ctx)
+        val oldDelete = prefs.deleteOriginal
+        try {
+            prefs.deleteOriginal = true
+            val iso = makeIso("del.iso", 100)
+            // não verificado → mantém
+            val j1 = Job(100, SourceKind.IMAGE, input(iso), emptyList())
+            j1.state = JobState.DONE
+            j1.verified = false
+            j1.outputUri = Uri.fromFile(iso)
+            val p1 = Deletion.plan(ctx, j1, prefs)
+            assertTrue(!p1.allowed && p1.files.isEmpty())
+            // falhou → nunca
+            val j2 = Job(101, SourceKind.IMAGE, input(iso), emptyList())
+            j2.state = JobState.FAILED
+            j2.verified = true
+            assertTrue(!Deletion.plan(ctx, j2, prefs).allowed)
+            // cancelado → nunca
+            j2.state = JobState.CANCELLED
+            assertTrue(!Deletion.plan(ctx, j2, prefs).allowed)
+            // opção desligada → nunca
+            prefs.deleteOriginal = false
+            j2.state = JobState.DONE
+            assertTrue(!Deletion.plan(ctx, j2, prefs).allowed)
+            // extração exige autorização extra
+            prefs.deleteOriginal = true
+            val j3 = Job(102, SourceKind.CHD, input(iso), emptyList(), Operation.EXTRACT)
+            j3.state = JobState.DONE
+            j3.verified = true
+            assertTrue(!Deletion.plan(ctx, j3, prefs).allowed)
+            assertTrue(iso.exists())
+        } finally {
+            prefs.deleteOriginal = oldDelete
+        }
     }
 }

@@ -195,6 +195,50 @@ object Ui {
             minimumHeight = dp(ctx, 6)
         }
 
+    /** Interruptor com texto, com foco visível para D-pad. */
+    fun switchRow(ctx: Context, label: String, checked: Boolean, tag: String, onChange: (Boolean) -> Unit): android.widget.Switch =
+        android.widget.Switch(ctx).apply {
+            this.tag = tag
+            text = label
+            setTextColor(FG)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+            isChecked = checked
+            minHeight = dp(ctx, 44)
+            background = stateBackground(ctx, BG, 0, RADIUS, withAlpha(SUBTLE, 0.35f))
+            setPadding(dp(ctx, 4), dp(ctx, 4), dp(ctx, 4), dp(ctx, 4))
+            thumbTintList = ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked), IntArray(0)), intArrayOf(FG, SUBTLE))
+            trackTintList = ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked), IntArray(0)), intArrayOf(SUBTLE, BORDER))
+            setOnCheckedChangeListener { _, c -> onChange(c) }
+        }
+
+    /** Par rótulo/valor em coluna (painéis de progresso e de informações). */
+    fun stat(ctx: Context, label: String): Pair<View, TextView> {
+        val value = text(ctx, "—", 14f, FG, bold = true).apply { maxLines = 2 }
+        val box = column(ctx, 0).apply {
+            addView(label(ctx, label))
+            addView(value)
+        }
+        return box to value
+    }
+
+    /** Linha "rótulo  valor" para listas de detalhes (inspeção de CHD). */
+    fun infoRow(ctx: Context, label: String, value: String): View = row(ctx, 12).apply {
+        addView(text(ctx, label, 13f, SUBTLE), LinearLayout.LayoutParams(dp(ctx, 120), ViewGroup.LayoutParams.WRAP_CONTENT))
+        addView(text(ctx, value, 13f, FG).apply { setTextIsSelectable(true) }, weighted())
+    }
+
+    /** Texto de estado vazio, centralizado e discreto. */
+    fun empty(ctx: Context, s: String): TextView = text(ctx, s, 13f, SUBTLE).apply {
+        gravity = Gravity.CENTER
+        setPadding(dp(ctx, 16), dp(ctx, 24), dp(ctx, 16), dp(ctx, 24))
+    }
+
+    /** Linha divisória #1A1A1A, como no launcher do Crash. */
+    fun divider(ctx: Context): View = View(ctx).apply {
+        setBackgroundColor(LINE)
+        layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(ctx, 1))
+    }
+
     fun lp(w: Int = ViewGroup.LayoutParams.MATCH_PARENT, h: Int = ViewGroup.LayoutParams.WRAP_CONTENT, weight: Float = 0f) =
         LinearLayout.LayoutParams(w, h, weight)
 

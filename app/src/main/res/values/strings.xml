@@ -1,55 +1,111 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Conversor CHD</string>
-    <string name="subtitle">ISO · CUE/BIN · GDI → CHD · núcleo chdman (MAME)</string>
+    <string name="app_name">CHDify</string>
+    <string name="subtitle">ISO · BIN/CUE · GDI ⇄ CHD</string>
 
-    <!-- ações -->
-    <string name="action_add_files">Adicionar arquivos</string>
-    <string name="action_add_folder">Adicionar pasta</string>
-    <string name="action_start">Iniciar conversão</string>
-    <string name="action_start_n">Iniciar conversão (%1$d)</string>
-    <string name="action_cancel">Cancelar</string>
+    <!-- seções -->
+    <string name="tab_convert">Conversão</string>
+    <string name="tab_queue">Fila</string>
+    <string name="tab_tools">Ferramentas</string>
+    <string name="tab_history">Histórico</string>
+    <string name="tab_settings">Ajustes</string>
+
+    <!-- conversão -->
+    <string name="section_add">Adicionar</string>
+    <string name="add_hint">ISO, BIN/CUE e GDI viram CHD. CHD vira ISO, BIN/CUE ou GDI. O tipo é detectado automaticamente.</string>
+    <string name="convert_empty">Adicione arquivos ou uma pasta para começar.</string>
+    <string name="action_add_files">Arquivos</string>
+    <string name="action_add_folder">Pasta</string>
+    <string name="action_start">Iniciar</string>
+    <plurals name="action_start_n">
+        <item quantity="one">Iniciar (%1$d item)</item>
+        <item quantity="other">Iniciar (%1$d itens)</item>
+    </plurals>
+    <string name="action_cancel_item">Cancelar item</string>
+    <string name="action_cancel_queue">Cancelar fila</string>
     <string name="action_clear_finished">Limpar concluídos</string>
-    <string name="action_retry">Tentar de novo</string>
+    <string name="action_retry">Reiniciar</string>
     <string name="action_log">Log</string>
     <string name="action_remove">Remover</string>
     <string name="action_copy">Copiar</string>
+    <string name="action_share">Compartilhar</string>
     <string name="action_close">Fechar</string>
+    <string name="action_open_folder">Abrir pasta</string>
+    <string name="action_new">Nova conversão</string>
+    <string name="action_finish">Concluir</string>
+    <string name="action_move_up">Mover para cima</string>
+    <string name="action_move_down">Mover para baixo</string>
+    <string name="action_delete_original">Excluir original</string>
+    <string name="action_keep_original">Manter</string>
+    <string name="action_review_delete">Revisar exclusões pendentes (%1$d)</string>
 
-    <!-- opções -->
     <string name="dest_label">Destino: %1$s</string>
     <string name="dest_choose">Escolher pasta de destino</string>
-    <string name="option_verify">Verificar integridade após converter</string>
-    <string name="threads_auto">Núcleos da CPU: automático (%1$d)</string>
-    <plurals name="threads_n">
-        <item quantity="one">Núcleos da CPU: %1$d</item>
-        <item quantity="other">Núcleos da CPU: %1$d</item>
-    </plurals>
 
     <!-- progresso -->
-    <string name="stage_compressing">Comprimindo · %1$s</string>
-    <string name="stage_verifying">Verificando integridade · %1$s</string>
-    <string name="idle_title">Nenhuma conversão em andamento</string>
+    <string name="stage_compressing">Comprimindo</string>
+    <string name="stage_extracting">Extraindo</string>
+    <string name="stage_recompressing">Recompactando</string>
+    <string name="stage_verifying">Verificando integridade</string>
+    <string name="stat_speed">Velocidade</string>
+    <string name="stat_elapsed">Decorrido</string>
+    <string name="stat_remaining">Restante</string>
+    <string name="stat_original">Original</string>
+    <string name="stat_processed">Processado</string>
+    <string name="stat_verify">Verificação</string>
+    <string name="stat_saved">Economia</string>
+    <string name="verify_running">em andamento</string>
+    <string name="verify_ok">OK ✓</string>
+    <string name="verify_pending">a seguir</string>
+    <string name="verify_inline">durante a extração</string>
+    <string name="verify_off">desligada</string>
+    <string name="verify_partial">%1$d de %2$d verificados</string>
+    <string name="overall_line">Fila: item %1$d de %2$d · %3$s do total</string>
     <string name="idle_starting">Iniciando…</string>
-    <string name="idle_hint">Adicione arquivos ISO, CUE ou GDI e toque em Iniciar.</string>
-    <string name="idle_done">%1$d arquivo(s) convertido(s) nesta sessão.</string>
+
+    <!-- conclusão -->
+    <string name="done_title_ok">Concluído</string>
+    <string name="done_title_partial">Concluído com pendências</string>
+    <string name="done_title_fail">Não foi concluído</string>
+    <string name="done_counts">%1$d concluído(s) · %2$d com erro · %3$d cancelado(s) · %4$d ignorado(s)</string>
+    <string name="done_delete_counts">%1$d excluído(s) · %2$d aguardando confirmação · %3$d mantido(s)</string>
+    <string name="info_file">Arquivo</string>
+    <string name="info_operation">Operação</string>
+    <string name="info_result">Resultado</string>
+    <string name="info_items">Itens</string>
+    <string name="info_verify">Integridade</string>
+    <string name="info_final">Final</string>
+    <string name="info_time">Tempo total</string>
+    <string name="info_location">Local</string>
+    <string name="info_originals">Originais</string>
 
     <!-- fila -->
-    <string name="queue_title">Fila (%1$d)</string>
-    <string name="queue_empty">A fila está vazia.</string>
-    <string name="kind_image">Imagem</string>
-    <string name="kind_cue">CUE · %1$d arquivo(s)</string>
-    <string name="kind_gdi">GDI · %1$d arquivo(s)</string>
+    <string name="queue_header">%1$d itens · %2$d prontos · %3$d concluídos · %4$d com erro</string>
+    <string name="queue_empty">A fila está vazia. Adicione arquivos na seção Conversão.</string>
+    <string name="kind_cue">%1$d arquivo(s) de trilha</string>
+    <string name="kind_gdi">%1$d arquivo(s) de trilha</string>
     <string name="mode_cd">CD</string>
     <string name="mode_dvd">DVD</string>
+    <string name="m3u_group">playlist %1$s</string>
+    <string name="op_convert">Converter</string>
+    <string name="op_extract">Extrair</string>
+    <string name="op_recompress">Recompactar</string>
+    <string name="op_verify">Verificar</string>
     <string name="state_analyzing">Analisando…</string>
-    <string name="state_ready">Pronto para converter</string>
-    <string name="state_blocked">Não pode ser convertido</string>
-    <string name="state_running">Convertendo · %1$s</string>
+    <string name="state_ready">Pronto</string>
+    <string name="state_blocked">Não pode ser processado</string>
+    <string name="state_running">Processando · %1$s</string>
     <string name="state_verifying">Verificando · %1$s</string>
+    <string name="state_done_short">Concluído</string>
     <string name="state_verified">verificado ✓</string>
     <string name="state_failed">Falhou</string>
     <string name="state_cancelled">Cancelado</string>
+    <string name="state_interrupted">Interrompido</string>
+    <string name="state_skipped">Ignorado</string>
+    <string name="msg_interrupted">O app foi encerrado durante a operação. O arquivo incompleto foi descartado; toque em Reiniciar para refazer do início.</string>
+    <string name="done_line">%1$s · %2$s · economia de %3$s (%4$s)</string>
+    <string name="done_extract">%1$s · %2$s</string>
+    <string name="done_verify">Integridade confirmada (SHA-1 dos dados e global)</string>
     <plurals name="tracks">
         <item quantity="one">%1$d trilha</item>
         <item quantity="other">%1$d trilhas</item>
@@ -57,6 +113,106 @@
     <plurals name="audio_tracks">
         <item quantity="one">%1$d de áudio</item>
         <item quantity="other">%1$d de áudio</item>
+    </plurals>
+
+    <!-- exclusão do original -->
+    <string name="delete_pending">Exclusão do original aguardando confirmação (%1$d arquivo(s)).</string>
+    <string name="delete_done">Original excluído</string>
+    <string name="delete_kept">Original mantido: %1$s</string>
+    <string name="delete_failed">Não foi possível excluir: %1$s. Os arquivos continuam no lugar.</string>
+    <plurals name="deleted_files">
+        <item quantity="one">Original excluído (%1$d arquivo)</item>
+        <item quantity="other">Originais excluídos (%1$d arquivos)</item>
+    </plurals>
+    <string name="delete_confirm_title">Excluir o original?</string>
+    <string name="delete_confirm_message">O arquivo gerado (%1$s) foi verificado. Estes arquivos serão apagados:\n\n%2$s\n\nEsta ação não pode ser desfeita.</string>
+    <string name="delete_enable_title">Excluir originais automaticamente?</string>
+    <string name="delete_enable_message">Depois de cada item concluído e verificado, o original poderá ser apagado.\n\n• A verificação de integridade fica obrigatória.\n• Nada é apagado após falhas, cancelamentos ou interrupções.\n• Arquivos usados por outro item, outra folha .cue/.gdi ou playlist .m3u são mantidos.\n• Para BIN/CUE e GDI, adicione os jogos pela opção Pasta (assim é possível conferir se outro jogo usa as mesmas trilhas).\n• Por padrão, cada exclusão pede confirmação.</string>
+    <string name="delete_enable_ok">Ativar</string>
+    <string name="delete_rules">Nada é apagado sem verificação. Para BIN/CUE e GDI, adicione pela opção Pasta.</string>
+    <string name="keep_not_verified">a verificação de integridade não foi feita</string>
+    <string name="keep_output_missing">o arquivo gerado não foi encontrado com o tamanho esperado</string>
+    <string name="keep_shared_queue">%1$s também é usado por %2$s</string>
+    <string name="keep_shared_sibling">%1$s é referenciado por %2$s</string>
+    <string name="keep_unreadable_sibling">não foi possível ler %1$s para conferir dependências</string>
+    <string name="keep_need_folder">adicione pela opção Pasta para que as trilhas compartilhadas possam ser conferidas</string>
+    <string name="keep_no_permission">sem permissão para excluir %1$s</string>
+    <string name="keep_changed">as condições mudaram desde a conclusão</string>
+    <string name="keep_user">mantido pelo usuário</string>
+
+    <!-- ferramentas -->
+    <string name="tools_pick">Selecionar CHD</string>
+    <string name="tools_hint">Inspecione, verifique, recompacte ou extraia um arquivo CHD.</string>
+    <string name="tools_none">Nenhum CHD selecionado</string>
+    <string name="tools_verify">Verificar integridade</string>
+    <string name="tools_recompress">Recompactar (perfil %1$s)</string>
+    <string name="tools_extract">Extrair para %1$s</string>
+    <string name="tools_export">Exportar informações técnicas</string>
+    <string name="tools_report_title">informações do CHD</string>
+    <string name="info_version">Versão</string>
+    <string name="info_type">Tipo</string>
+    <string name="info_tracks">Trilhas</string>
+    <string name="info_file_size">Arquivo</string>
+    <string name="info_logical">Dados</string>
+    <string name="info_ratio">Taxa</string>
+    <string name="info_hunk">Hunk</string>
+    <string name="info_codecs">Codecs</string>
+    <string name="info_uncompressed">sem compressão</string>
+    <string name="info_sha1_data">SHA-1 (dados)</string>
+    <string name="info_sha1">SHA-1 (global)</string>
+    <string name="info_metadata">Metadados</string>
+    <string name="chd_type_other">outro (disco rígido/LaserDisc)</string>
+
+    <!-- histórico -->
+    <string name="history_empty">Nenhuma operação registrada.</string>
+    <string name="history_clear">Limpar histórico</string>
+    <string name="history_clear_title">Limpar o histórico?</string>
+    <string name="history_clear_message">As entradas do histórico serão apagadas. Nenhum arquivo é afetado.</string>
+
+    <!-- ajustes -->
+    <string name="set_destination">Destino</string>
+    <string name="set_files">Arquivos</string>
+    <string name="set_conflict">Se já existir no destino</string>
+    <string name="set_performance">Desempenho</string>
+    <string name="set_about">Sobre</string>
+    <string name="option_verify">Verificar integridade após processar</string>
+    <string name="option_delete">Excluir original após converter</string>
+    <string name="option_confirm_delete">Confirmar antes de excluir</string>
+    <string name="option_delete_chd_ops">Também na extração e na recompactação</string>
+    <string name="option_organize">Organizar em pastas por console</string>
+    <string name="option_m3u">Criar playlist .m3u para jogos multidisco</string>
+    <string name="conflict_rename">Renomear</string>
+    <string name="conflict_skip">Pular</string>
+    <string name="about_text">CHDify %1$s\nNúcleo: %2$s\nCódigo CHD oficial do MAME (BSD-3-Clause). Funciona offline, sem coleta de dados.</string>
+
+    <string name="profile_label">Perfil de compactação</string>
+    <string name="profile_fast">Rápido</string>
+    <string name="profile_balanced">Equilibrado</string>
+    <string name="profile_max">Máximo</string>
+    <string name="profile_fast_hint">Prioriza a velocidade (codecs zlib/FLAC). Em geral várias vezes mais rápido, com arquivo um pouco maior.</string>
+    <string name="profile_balanced_hint">Configuração padrão do chdman: resultado idêntico ao chdman oficial e máxima compatibilidade.</string>
+    <string name="profile_max_hint">Prioriza o menor arquivo (hunks maiores com LZMA). Mais lento; lido por emuladores atuais baseados em libchdr. Se algum leitor antigo recusar, use Equilibrado.</string>
+    <string name="profile_params">DVD: %1$s · CD: %2$s</string>
+
+    <string name="cpu_economy">Econômico</string>
+    <string name="cpu_balanced">Equilibrado</string>
+    <string name="cpu_performance">Desempenho</string>
+    <string name="cpu_economy_hint">Usa %2$d de %1$d núcleos e prioridade baixa: mais lento, com menos calor e consumo de bateria.</string>
+    <string name="cpu_balanced_hint">Usa os %1$d núcleos com prioridade levemente reduzida, para a interface continuar fluida.</string>
+    <string name="cpu_performance_hint">Usa os %1$d núcleos com prioridade normal. Em conversões longas o aparelho pode esquentar e reduzir a frequência.</string>
+
+    <string name="advanced_show">Avançado ▸</string>
+    <string name="advanced_hide">Avançado ▾</string>
+    <string name="advanced_note">Hunks maiores reduzem o tamanho e aumentam o uso de RAM e o custo de cada leitura aleatória no emulador. Todos os valores são aceitos pelo chdman oficial. As threads não mudam durante uma operação.</string>
+    <string name="hunk_dvd">Hunk (DVD): %1$s</string>
+    <string name="hunk_cd">Hunk (CD): %1$s</string>
+    <string name="hunk_profile">do perfil</string>
+    <string name="hunk_frames">%1$d quadros</string>
+    <string name="threads_auto">Threads: automático (%1$d núcleos)</string>
+    <string name="threads_auto_clusters">Threads: automático (%1$d núcleos · %2$s)</string>
+    <plurals name="threads_n">
+        <item quantity="one">Threads: %1$d</item>
+        <item quantity="other">Threads: %1$d</item>
     </plurals>
 
     <!-- análise -->
@@ -76,75 +232,72 @@
     <string name="err_layout">O tamanho do arquivo não corresponde a setores de 2048, 2336 ou 2352 bytes. Arquivo inválido ou corrompido.</string>
     <string name="err_truncated">Imagem truncada: o sistema de arquivos declara %1$s, mas o arquivo tem %2$s. Faça uma nova cópia do arquivo.</string>
     <string name="err_sheet_empty">A folha de trilhas está vazia ou não pôde ser lida.</string>
-    <string name="err_missing_tracks">Arquivos de trilha ausentes: %1$s. Selecione o .cue/.gdi junto com seus arquivos (seleção múltipla) ou use “Adicionar pasta”.</string>
+    <string name="err_missing_tracks">Arquivos de trilha ausentes: %1$s. Selecione o .cue/.gdi junto com seus arquivos (seleção múltipla) ou use a opção Pasta.</string>
     <string name="err_sheet_invalid">Folha de trilhas inválida: %1$s</string>
+    <string name="err_chd_invalid">CHD inválido ou corrompido: %1$s</string>
+    <string name="err_chd_type_unsupported">Este CHD não é de CD, GD-ROM nem DVD (disco rígido ou LaserDisc); a extração não é suportada.</string>
 
-    <!-- conversão -->
-    <string name="msg_cancelled">Conversão cancelada. O arquivo parcial foi removido.</string>
-    <string name="err_no_destination">Escolha uma pasta de destino antes de converter.</string>
-    <string name="err_create_output">Não foi possível criar o arquivo de destino.</string>
-    <string name="err_invalid">Imagem inválida: %1$s</string>
-    <string name="err_no_space">Sem espaço de armazenamento no destino. O arquivo parcial foi removido.</string>
+    <!-- operação -->
+    <string name="msg_cancelled">Operação cancelada. Os arquivos parciais foram removidos.</string>
+    <string name="msg_skipped_exists">%1$s já existe no destino (ajuste: pular).</string>
+    <string name="err_no_destination">Escolha uma pasta de destino antes de começar.</string>
+    <string name="err_invalid">Entrada inválida: %1$s</string>
+    <string name="err_no_space">Sem espaço de armazenamento no destino. Os arquivos parciais foram removidos.</string>
     <string name="err_io">Erro de leitura/gravação: %1$s</string>
     <string name="err_chd">Erro ao gravar o CHD: %1$s</string>
     <string name="err_verify">Falha na verificação de integridade: %1$s</string>
+    <string name="err_rename">Não foi possível dar o nome final a %1$s.</string>
+    <string name="err_permission_lost">O acesso a um arquivo ou pasta foi perdido (permissão revogada ou mídia removida). Adicione os arquivos ou escolha o destino de novo.</string>
+    <string name="err_storage_lost">Arquivo ou pasta indisponível: %1$s. O cartão SD ou a unidade USB pode ter sido removido.</string>
     <string name="err_generic">Erro: %1$s</string>
     <string name="err_service">Não foi possível iniciar o serviço: %1$s</string>
     <string name="err_no_picker">Nenhum gerenciador de arquivos disponível neste aparelho.</string>
+    <string name="err_no_share">Nenhum app disponível para compartilhar.</string>
+
+    <!-- espaço -->
+    <string name="space_title">Pouco espaço no destino</string>
+    <string name="space_message">Livre: %1$s. Estimativa conservadora para a fila: até %2$s (o resultado costuma ser menor). Se o espaço acabar, o item afetado é interrompido e o arquivo parcial apagado.</string>
+    <string name="space_continue">Continuar</string>
 
     <!-- avisos rápidos -->
-    <string name="toast_nothing_added">Nenhuma imagem compatível (.iso, .cue, .gdi, .img, .bin) foi encontrada.</string>
+    <string name="toast_nothing_added">Nenhum arquivo compatível (.iso, .cue, .gdi, .img, .bin, .chd) foi encontrado.</string>
     <plurals name="toast_ignored">
         <item quantity="one">%1$d arquivo ignorado (formato não suportado).</item>
         <item quantity="other">%1$d arquivos ignorados (formato não suportado).</item>
     </plurals>
-    <string name="toast_nothing_ready">Não há itens prontos para converter.</string>
-    <string name="toast_choose_dest">Escolha a pasta onde os arquivos CHD serão salvos.</string>
-    <string name="toast_copied">Log copiado.</string>
+    <plurals name="toast_duplicates">
+        <item quantity="one">%1$d item já estava na fila.</item>
+        <item quantity="other">%1$d itens já estavam na fila.</item>
+    </plurals>
+    <plurals name="toast_m3u">
+        <item quantity="one">%1$d jogo multidisco reconhecido (playlist .m3u).</item>
+        <item quantity="other">%1$d jogos multidisco reconhecidos (playlists .m3u).</item>
+    </plurals>
+    <string name="toast_nothing_ready">Não há itens prontos na fila.</string>
+    <string name="toast_choose_dest">Escolha a pasta onde os arquivos serão salvos.</string>
+    <string name="toast_copied">Copiado.</string>
+    <string name="toast_not_chd">Selecione um arquivo .chd.</string>
+    <string name="toast_tool_queued">%1$s: adicionado à fila.</string>
+    <string name="toast_open_folder_unsupported">Este aparelho não abre pastas diretamente. Os arquivos estão em: %1$s</string>
+    <string name="toast_verify_required">A verificação é obrigatória enquanto "Excluir original" estiver ativo.</string>
     <string name="log_empty">(sem registros)</string>
 
     <!-- cancelamento -->
-    <string name="cancel_title">Cancelar conversão?</string>
-    <string name="cancel_message">A conversão atual será interrompida e o arquivo parcial apagado. Os itens restantes continuam na fila.</string>
-    <string name="cancel_confirm">Cancelar conversão</string>
-    <string name="cancel_keep">Continuar</string>
+    <string name="cancel_title">Cancelar a fila?</string>
+    <string name="cancel_message">O item atual será interrompido e seus arquivos parciais apagados. Os demais itens continuam na fila, prontos para depois.</string>
+    <string name="cancel_confirm">Cancelar fila</string>
+    <string name="cancel_keep">Voltar</string>
 
     <!-- notificações -->
-    <string name="channel_progress">Progresso da conversão</string>
-    <string name="channel_result">Conversões concluídas</string>
-    <string name="notif_starting">Preparando conversão…</string>
+    <string name="channel_progress">Progresso</string>
+    <string name="channel_result">Resultados</string>
+    <string name="notif_starting">Preparando…</string>
     <string name="notif_converting">Convertendo %1$s</string>
+    <string name="notif_extracting">Extraindo %1$s</string>
+    <string name="notif_recompressing">Recompactando %1$s</string>
     <string name="notif_verifying">Verificando %1$s</string>
     <string name="notif_progress_line">%1$s · %2$s · resta %3$s</string>
-    <string name="notif_done_title">Fila concluída</string>
+    <string name="notif_done_title">CHDify: fila concluída</string>
     <string name="notif_done_text">%1$d concluído(s), %2$d com erro.</string>
-    <!-- perfis -->
-    <string name="profile_label">Perfil de compactação</string>
-    <string name="profile_fast">Rápido</string>
-    <string name="profile_balanced">Equilibrado</string>
-    <string name="profile_max">Máximo</string>
-    <string name="profile_fast_hint">Prioriza a velocidade (codecs zlib/FLAC). Em geral várias vezes mais rápido, com arquivo um pouco maior.</string>
-    <string name="profile_balanced_hint">Configuração padrão do chdman: resultado idêntico ao chdman oficial e máxima compatibilidade.</string>
-    <string name="profile_max_hint">Prioriza o menor arquivo (hunks maiores com LZMA). Mais lento; lido por emuladores atuais baseados em libchdr. Se algum leitor antigo recusar, use Equilibrado.</string>
-    <string name="profile_params">DVD: %1$s · CD: %2$s</string>
-    <string name="advanced_show">Avançado ▸</string>
-    <string name="advanced_hide">Avançado ▾</string>
-    <string name="advanced_note">Hunks maiores reduzem o tamanho e aumentam o uso de RAM e o custo de cada leitura aleatória no emulador. Todos os valores são aceitos pelo chdman oficial. As threads não mudam durante uma conversão.</string>
-    <string name="hunk_dvd">Hunk (DVD): %1$s</string>
-    <string name="hunk_cd">Hunk (CD): %1$s</string>
-    <string name="hunk_profile">do perfil</string>
-    <string name="hunk_frames">%1$d quadros</string>
-    <string name="threads_auto_clusters">Núcleos da CPU: automático (%1$d · %2$s)</string>
-
-    <!-- painel -->
-    <string name="stat_speed">Velocidade</string>
-    <string name="stat_elapsed">Decorrido</string>
-    <string name="stat_remaining">Restante</string>
-    <string name="stat_original">Original</string>
-    <string name="stat_compressed">Comprimido</string>
-    <string name="stat_saved">Economia</string>
-    <string name="state_done_short">Concluído</string>
-    <string name="done_line">%1$s · %2$s · economia de %3$s (%4$s)</string>
-    <string name="action_move_up">Mover para cima</string>
-    <string name="action_move_down">Mover para baixo</string>
+    <string name="notif_failed_title">Falhou: %1$s</string>
 </resources>

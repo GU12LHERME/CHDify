@@ -46,7 +46,7 @@
 extern const char bare_build_version[];
 extern const char build_version[];
 const char bare_build_version[] = "0.283";
-const char build_version[] = "0.283 (ConversorCHD, MAME " CHDCONV_MAME_COMMIT ")";
+const char build_version[] = "0.283 (CHDify, MAME " CHDCONV_MAME_COMMIT ")";
 
 // Definido em src/osd/osdsync.cpp: número de threads da fila de trabalho (0 = auto)
 extern int osd_num_processors;
@@ -1624,13 +1624,42 @@ std::string chd_info_json(int chd_fd)
 	std::string meta;
 	if (!chd.read_metadata(DVD_METADATA_TAG, 0, meta))
 		type = "dvd";
+	else if (!chd.read_metadata(GDROM_TRACK_METADATA_TAG, 0, meta) || !chd.read_metadata(GDROM_OLD_METADATA_TAG, 0, meta))
+		type = "gd";
 	else if (!chd.read_metadata(CDROM_TRACK_METADATA2_TAG, 0, meta) || !chd.read_metadata(CDROM_TRACK_METADATA_TAG, 0, meta)
-			|| !chd.read_metadata(GDROM_TRACK_METADATA_TAG, 0, meta))
-	{
+			|| !chd.read_metadata(CDROM_OLD_METADATA_TAG, 0, meta))
 		type = "cd";
+	if (type == "cd" || type == "gd")
 		for (chd_metadata_tag tag : { CDROM_TRACK_METADATA2_TAG, CDROM_TRACK_METADATA_TAG, GDROM_TRACK_METADATA_TAG })
-			while (!chd.read_metadata(tag, tracks, meta))
+			for (int i = 0; !chd.read_metadata(tag, i, meta); ++i)
 				++tracks;
+
+	// todos os metadados, como "tag: texto" (os binários aparecem só com o tamanho)
+	std::string metalist;
+	{
+		std::vector<std::uint8_t> data;
+		chd_metadata_tag tag;
+		std::uint8_t flags;
+		for (std::uint32_t i = 0; !chd.read_metadata(CHDMETATAG_WILDCARD, i, data, tag, flags); ++i)
+		{
+			char tagstr[5] = { char(tag >> 24), char(tag >> 16), char(tag >> 8), char(tag), 0 };
+			bool printable = true;
+			std::string text;
+			for (std::uint8_t b : data)
+			{
+				if (b == 0)
+					break;
+				if (b < 0x20 || b > 0x7e)
+				{
+					printable = false;
+					break;
+				}
+				text.push_back(char(b));
+			}
+			if (!metalist.empty())
+				metalist += ',';
+			metalist += '"' + json_escape(std::string(tagstr) + ": " + (printable ? text : util::string_format("(%u bytes)", data.size()))) + '"';
+		}
 	}
 	std::string comp;
 	for (int i = 0; i < 4; ++i)
@@ -1644,9 +1673,9 @@ std::string chd_info_json(int chd_fd)
 	}
 	return util::string_format(
 			"{\"ok\":true,\"version\":%u,\"type\":\"%s\",\"tracks\":%d,\"logicalBytes\":%u,\"fileBytes\":%u,"
-			"\"hunkBytes\":%u,\"unitBytes\":%u,\"compression\":\"%s\",\"sha1\":\"%s\",\"rawSha1\":\"%s\"}",
+			"\"hunkBytes\":%u,\"unitBytes\":%u,\"compression\":\"%s\",\"sha1\":\"%s\",\"rawSha1\":\"%s\",\"metadata\":[%s]}",
 			chd.version(), type, tracks, chd.logical_bytes(), filelen, chd.hunk_bytes(), chd.unit_bytes(),
-			json_escape(comp), chd.sha1().as_string(), chd.raw_sha1().as_string());
+			json_escape(comp), chd.sha1().as_string(), chd.raw_sha1().as_string(), metalist);
 }
 
 // Sem o mutex global e sem capturar std::cerr (que pode estar redirecionado por

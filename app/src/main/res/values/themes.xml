@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- Tema escuro com fundo preto puro (OLED). Componentes seguem tokens do Material Design 3 (ver ui/Ui.kt). -->
-    <style name="Theme.ConversorCHD" parent="android:Theme.Material.NoActionBar">
+    <style name="Theme.CHDify" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@color/black</item>
         <item name="android:colorBackground">@color/black</item>
         <item name="android:colorPrimary">@color/primary</item>

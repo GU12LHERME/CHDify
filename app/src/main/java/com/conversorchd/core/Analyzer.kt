@@ -34,10 +34,23 @@ object Analyzer {
         else -> null
     }
 
+    /** Analisa e aplica o resultado ao item (pronto ou bloqueado, com o motivo no log). */
+    fun analyzeAndApply(ctx: Context, job: Job) {
+        val a = analyze(ctx, job)
+        job.analysis = a
+        job.mode = a.recommended
+        val usable = a.error == null && (job.operation != Operation.CONVERT || a.recommended != null)
+        job.state = if (usable) JobState.READY else JobState.BLOCKED
+        job.log("Análise: ${a.summary}")
+        a.warnings.forEach { job.log("Aviso: $it") }
+        a.error?.let { job.log("Erro: $it") }
+    }
+
     fun analyze(ctx: Context, job: Job): Analysis = try {
         when (job.kind) {
-            SourceKind.IMAGE -> analyzeImage(ctx, job)
-            SourceKind.CUE, SourceKind.GDI -> analyzeSheet(ctx, job)
+            SourceKind.IMAGE -> analyzeImage(ctx, job).let { it.copy(outputEstimate = job.inputBytes) }
+            SourceKind.CUE, SourceKind.GDI -> analyzeSheet(ctx, job).let { it.copy(outputEstimate = job.inputBytes) }
+            SourceKind.CHD -> analyzeChd(ctx, job)
         }
     } catch (e: Exception) {
         Analysis(emptySet(), null, "", emptyList(), ctx.getString(R.string.err_analysis, e.message ?: e.javaClass.simpleName))
@@ -86,8 +99,20 @@ object Analyzer {
             warnings.add(ctx.getString(R.string.warn_no_fs))
         }
         val fitsCd = !probe.exceedsCd && probe.size <= CD_MAX_BYTES
+        val platform = probe.platform
         val cdWarning = ctx.getString(R.string.warn_cd_from_iso)
 
+        return platformAnalysis(probe, parts, warnings, fitsCd, cdWarning, ctx).copy(platform = platform)
+    }
+
+    private fun platformAnalysis(
+        probe: ProbeInfo,
+        parts: ArrayList<String>,
+        warnings: ArrayList<String>,
+        fitsCd: Boolean,
+        cdWarning: String,
+        ctx: Context,
+    ): Analysis {
         return when (probe.platform) {
             "psp" -> Analysis(setOf(DiscMode.DVD), DiscMode.DVD, parts.joinToString(" · "), warnings + ctx.getString(R.string.info_psp), null)
             "ps2" -> {
@@ -143,7 +168,57 @@ object Analyzer {
                 if (types.isNotEmpty()) append(" · ").append(types.joinToString("/"))
                 append(" · ").append(Format.msf(frames))
             }
-            return Analysis(setOf(DiscMode.CD), DiscMode.CD, summary, emptyList(), null, n)
+            return Analysis(setOf(DiscMode.CD), DiscMode.CD, summary, emptyList(), null, n,
+                platform = if (o.optBoolean("gdrom")) "dreamcast" else "unknown")
         }
+    }
+
+    /**
+     * CHD de entrada: lê cabeçalho e metadados (o conteúdo é verificado por
+     * completo na própria operação). O tipo define a extração: DVD -> ISO,
+     * CD -> BIN/CUE, GD-ROM -> GDI.
+     */
+    private fun analyzeChd(ctx: Context, job: Job): Analysis {
+        val pfd = ctx.contentResolver.openFileDescriptor(job.main.uri, "r")
+            ?: return Analysis(emptySet(), null, "", emptyList(), ctx.getString(R.string.err_open))
+        val info = pfd.use { p ->
+            if (Storage.regularFileSize(p) < 0)
+                return Analysis(emptySet(), null, "", emptyList(), ctx.getString(R.string.err_not_regular))
+            ChdInfo.parse(NativeChd.chdInfo(p.fd))
+        }
+        if (!info.ok) return Analysis(emptySet(), null, "", emptyList(), ctx.getString(R.string.err_chd_invalid, info.error))
+        val typeName = when (info.type) {
+            "dvd" -> "DVD"
+            "cd" -> "CD"
+            "gd" -> "GD-ROM"
+            else -> ctx.getString(R.string.chd_type_other)
+        }
+        val summary = buildString {
+            append("CHD v${info.version} · $typeName")
+            if (info.tracks > 0) append(" · ").append(ctx.resources.getQuantityString(R.plurals.tracks, info.tracks, info.tracks))
+            append(" · ").append(Format.bytes(info.logicalBytes))
+            if (info.compression.isNotBlank()) append(" · ").append(info.compression)
+        }
+        val error = when {
+            info.version < 5 && job.operation == Operation.RECOMPRESS -> null // o chdman copy converte versões antigas para v5
+            info.type == "raw" && job.operation == Operation.EXTRACT -> ctx.getString(R.string.err_chd_type_unsupported)
+            else -> null
+        }
+        val mode = when (info.type) {
+            "dvd" -> DiscMode.DVD
+            "cd", "gd" -> DiscMode.CD
+            else -> null
+        }
+        val estimate = when (job.operation) {
+            Operation.EXTRACT -> info.logicalBytes
+            Operation.RECOMPRESS -> info.fileBytes
+            else -> 0L
+        }
+        return Analysis(
+            if (mode != null) setOf(mode) else emptySet(), mode, summary, emptyList(), error, info.tracks,
+            platform = if (info.type == "gd") "dreamcast" else "unknown",
+            outputEstimate = estimate,
+            chdType = info.type,
+        )
     }
 }

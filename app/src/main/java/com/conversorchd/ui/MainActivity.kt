@@ -7,84 +7,74 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Insets
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.SystemClock
-import android.view.Gravity
+import android.provider.DocumentsContract
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.widget.Button
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
-import android.widget.ProgressBar
 import android.widget.ScrollView
-import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import com.conversorchd.App
 import com.conversorchd.R
 import com.conversorchd.core.Analyzer
-import com.conversorchd.core.CompressionParams
-import com.conversorchd.core.CpuInfo
-import com.conversorchd.core.Profile
+import com.conversorchd.core.DeleteState
+import com.conversorchd.core.Deletion
 import com.conversorchd.core.DiscMode
 import com.conversorchd.core.Format
 import com.conversorchd.core.InputFile
 import com.conversorchd.core.Job
 import com.conversorchd.core.JobRepository
 import com.conversorchd.core.JobState
+import com.conversorchd.core.Operation
 import com.conversorchd.core.Prefs
+import com.conversorchd.core.SourceKind
 import com.conversorchd.core.SourceResolver
 import com.conversorchd.core.Storage
 import com.conversorchd.service.ConversionService
 
+/**
+ * Tela única com cinco seções: Conversão, Fila, Ferramentas, Histórico e Ajustes.
+ * Cada seção é uma classe ([Tab]) que constrói suas views e as atualiza no lugar.
+ */
 class MainActivity : Activity(), JobCard.Actions {
 
-    private lateinit var prefs: Prefs
-    private val cards = LinkedHashMap<Long, JobCard>()
+    interface Tab {
+        fun build(): View
+        fun refresh() {}
+    }
+
+    lateinit var prefs: Prefs
+        private set
     private val listener: () -> Unit = { refresh() }
     private var startAfterDestination = false
-
-    // views persistentes (recriadas apenas quando o layout muda de orientação/largura)
+    private var current = 0
     private lateinit var root: FrameLayout
-    private lateinit var destButton: Button
-    private lateinit var threadsButton: Button
-    private lateinit var verifySwitch: Switch
-    private lateinit var startButton: Button
-    private lateinit var cancelButton: Button
-    private lateinit var addFilesButton: Button
-    private lateinit var queueTitle: TextView
-    private lateinit var queueList: LinearLayout
-    private lateinit var clearButton: Button
-    private lateinit var emptyQueue: TextView
-    private lateinit var progName: TextView
-    private lateinit var progStage: TextView
-    private lateinit var progBar: ProgressBar
-    private lateinit var progPercent: TextView
-    private lateinit var statSpeed: TextView
-    private lateinit var statElapsed: TextView
-    private lateinit var statRemaining: TextView
-    private lateinit var statOriginal: TextView
-    private lateinit var statCompressed: TextView
-    private lateinit var statSaved: TextView
-    private lateinit var profileBox: LinearLayout
-    private lateinit var profileHint: TextView
-    private lateinit var advancedBox: LinearLayout
-    private lateinit var advancedToggle: Button
-    private lateinit var dvdHunkButton: Button
-    private lateinit var cdHunkButton: Button
-    private var focusAfterRefresh: Pair<Long, String>? = null
+    private lateinit var tabRow: LinearLayout
+    private lateinit var content: ScrollView
+    private lateinit var tabs: List<Tab>
+    private lateinit var tabTitles: List<Int>
+
+    /** Resultado de um seletor de CHD para a aba Ferramentas. */
+    var onChdPicked: ((InputFile) -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
+        current = savedInstanceState?.getInt("aba") ?: 0
+        tabs = listOf(ConvertTab(this), QueueTab(this), ToolsTab(this), HistoryTab(this), SettingsTab(this))
+        tabTitles = listOf(R.string.tab_convert, R.string.tab_queue, R.string.tab_tools, R.string.tab_history, R.string.tab_settings)
+
         root = FrameLayout(this).apply { setBackgroundColor(Ui.BG) }
         root.setOnApplyWindowInsetsListener { v, insets ->
             val bars: Insets = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -97,8 +87,12 @@ class MainActivity : Activity(), JobCard.Actions {
             insets
         }
         setContentView(root)
-        buildLayout()
-        if (savedInstanceState == null) addFilesButton.requestFocus()
+        buildShell()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        outState.putInt("aba", current)
     }
 
     override fun onStart() {
@@ -115,362 +109,131 @@ class MainActivity : Activity(), JobCard.Actions {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         val focusedTag = currentFocus?.tag
-        buildLayout()
+        buildShell()
         if (focusedTag != null) root.findViewWithTag<View>(focusedTag)?.requestFocus()
     }
 
-    // ================================================================== layout
-
-    private fun isWide(): Boolean {
+    /** Larguras de tablet/console na horizontal usam duas colunas onde fizer sentido. */
+    fun isWide(): Boolean {
         val c = resources.configuration
         return c.screenWidthDp >= 720 || (c.orientation == Configuration.ORIENTATION_LANDSCAPE && c.screenWidthDp >= 560)
     }
 
-    private fun buildLayout() {
+    // ================================================================== estrutura
+
+    private fun buildShell() {
         root.removeAllViews()
-        cards.clear()
         val pad = Ui.dp(this, 12)
+        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
-        val header = Ui.column(this, 0).apply {
-            addView(Ui.text(this@MainActivity, getString(R.string.app_name), 20f, Ui.ON_SURFACE, bold = true))
-            addView(Ui.text(this@MainActivity, getString(R.string.subtitle), 12f, Ui.ON_SURFACE_VAR))
+        val header = Ui.row(this, 10).apply {
+            setPadding(pad, pad, pad, Ui.dp(this@MainActivity, 4))
+            addView(Ui.text(this@MainActivity, getString(R.string.app_name), 20f, Ui.FG, bold = true))
+            addView(Ui.text(this@MainActivity, getString(R.string.subtitle), 12f, Ui.SUBTLE).apply { Ui.singleLine(this, middle = false) }, Ui.weighted())
         }
-        val actions = buildActionsCard()
-        val progress = buildProgressCard()
-        val controls = buildControls()
-        val queue = buildQueue()
+        column.addView(header, Ui.lp())
 
-        if (isWide()) {
-            val left = Ui.column(this, 8).apply {
-                setPadding(pad, pad, pad / 2, pad)
-                addView(header); addView(actions); addView(progress); addView(controls)
+        tabRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        val tabScroll = HorizontalScrollView(this).apply {
+            isHorizontalScrollBarEnabled = false
+            setPadding(pad - Ui.dp(this@MainActivity, 4), 0, pad, 0)
+            addView(tabRow)
+        }
+        column.addView(tabScroll, Ui.lp())
+        column.addView(Ui.divider(this))
+
+        content = ScrollView(this).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = false
+            descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
+        }
+        column.addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.addView(column, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        showTab(current)
+    }
+
+    private fun buildTabRow() {
+        tabRow.removeAllViews()
+        tabTitles.forEachIndexed { i, res ->
+            val label = if (i == 1) {
+                val n = JobRepository.snapshot().size
+                if (n > 0) "${getString(res)} ($n)" else getString(res)
+            } else getString(res)
+            val b = Ui.smallButton(this, label, Ui.Style.TEXT) { showTab(i) }.apply {
+                tag = "tab-$i"
+                setTextColor(if (i == current) Ui.FG else Ui.SUBTLE)
+                typeface = Typeface.create("sans-serif-medium", if (i == current) Typeface.BOLD else Typeface.NORMAL)
             }
-            val right = Ui.column(this, 8).apply {
-                setPadding(pad / 2, pad, pad, pad)
-                addView(queue)
+            val cell = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                addView(b)
+                // sublinhado branco na aba atual (como no launcher do Crash)
+                addView(View(this@MainActivity).apply { setBackgroundColor(if (i == current) Ui.FG else 0) },
+                    LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(this@MainActivity, 2)))
             }
-            val row = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                addView(scroll(left), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
-                addView(scroll(right), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1.1f))
-            }
-            root.addView(row, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        } else {
-            val col = Ui.column(this, 8).apply {
-                setPadding(pad, pad, pad, pad)
-                addView(header); addView(actions); addView(progress); addView(controls); addView(queue)
-            }
-            root.addView(scroll(col), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        }
-        refresh()
-    }
-
-    private fun scroll(child: View) = ScrollView(this).apply {
-        isFillViewport = true
-        isVerticalScrollBarEnabled = false
-        descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
-        addView(child)
-    }
-
-    private fun buildActionsCard(): View {
-        val card = Ui.card(this)
-        val col = Ui.column(this, 8)
-        addFilesButton = Ui.button(this, getString(R.string.action_add_files), Ui.Style.TONAL) { pickFiles() }.apply { tag = "add-files" }
-        val addFolder = Ui.button(this, getString(R.string.action_add_folder), Ui.Style.TONAL) { pickInputFolder() }.apply { tag = "add-folder" }
-        col.addView(Ui.row(this, 8).apply {
-            addView(addFilesButton, Ui.weighted())
-            addView(addFolder, Ui.weighted())
-        }, Ui.lp())
-        destButton = Ui.button(this, "", Ui.Style.OUTLINED) { pickDestination() }.apply {
-            tag = "dest"
-            gravity = Gravity.CENTER_VERTICAL or Gravity.START
-            Ui.singleLine(this)
-        }
-        col.addView(destButton, Ui.lp())
-
-        // perfil de compactação
-        col.addView(Ui.label(this, getString(R.string.profile_label)), Ui.lp().apply { topMargin = Ui.dp(this@MainActivity, 4) })
-        profileBox = LinearLayout(this)
-        col.addView(profileBox, Ui.lp())
-        profileHint = Ui.text(this, "", 12f, Ui.ON_SURFACE_VAR)
-        col.addView(profileHint)
-
-        verifySwitch = Switch(this).apply {
-            tag = "verify"
-            text = getString(R.string.option_verify)
-            setTextColor(Ui.ON_SURFACE)
-            textSize = 14f
-            isChecked = prefs.verifyAfter
-            minHeight = Ui.dp(this@MainActivity, 44)
-            background = Ui.stateBackground(this@MainActivity, Ui.BG, 0, Ui.RADIUS, Ui.withAlpha(Ui.SUBTLE, 0.35f))
-            setPadding(Ui.dp(this@MainActivity, 4), 0, Ui.dp(this@MainActivity, 4), 0)
-            thumbTintList = ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked), IntArray(0)), intArrayOf(Ui.FG, Ui.SUBTLE))
-            trackTintList = ColorStateList(arrayOf(intArrayOf(android.R.attr.state_checked), IntArray(0)), intArrayOf(Ui.SUBTLE, Ui.BORDER))
-            setOnCheckedChangeListener { _, checked -> prefs.verifyAfter = checked }
-        }
-        col.addView(verifySwitch, Ui.lp())
-
-        // opções avançadas (recolhidas por padrão)
-        advancedToggle = Ui.smallButton(this, "", Ui.Style.TEXT) { toggleAdvanced() }.apply {
-            tag = "advanced"
-            gravity = Gravity.CENTER_VERTICAL or Gravity.START
-        }
-        col.addView(advancedToggle, Ui.lp())
-        advancedBox = Ui.column(this, 6)
-        threadsButton = Ui.smallButton(this, "", Ui.Style.OUTLINED) { cycleThreads() }.apply {
-            tag = "threads"; gravity = Gravity.CENTER_VERTICAL or Gravity.START
-        }
-        dvdHunkButton = Ui.smallButton(this, "", Ui.Style.OUTLINED) { cycleHunk(DiscMode.DVD) }.apply {
-            tag = "hunk-dvd"; gravity = Gravity.CENTER_VERTICAL or Gravity.START
-        }
-        cdHunkButton = Ui.smallButton(this, "", Ui.Style.OUTLINED) { cycleHunk(DiscMode.CD) }.apply {
-            tag = "hunk-cd"; gravity = Gravity.CENTER_VERTICAL or Gravity.START
-        }
-        advancedBox.addView(threadsButton, Ui.lp())
-        advancedBox.addView(dvdHunkButton, Ui.lp())
-        advancedBox.addView(cdHunkButton, Ui.lp())
-        advancedBox.addView(Ui.text(this, getString(R.string.advanced_note), 11f, Ui.ON_SURFACE_VAR))
-        col.addView(advancedBox, Ui.lp())
-
-        card.addView(col, Ui.lp())
-        updateOptionLabels()
-        return card
-    }
-
-    private fun stat(label: String): Pair<View, TextView> {
-        val value = Ui.singleLine(Ui.text(this, "—", 14f, Ui.ON_SURFACE, bold = true), middle = false)
-        val box = Ui.column(this, 0).apply {
-            addView(Ui.label(this@MainActivity, label))
-            addView(value)
-        }
-        return box to value
-    }
-
-    private fun buildProgressCard(): View {
-        val card = Ui.card(this)
-        val col = Ui.column(this, 6)
-        progName = Ui.singleLine(Ui.text(this, "", 14f, Ui.ON_SURFACE, bold = true))
-        progStage = Ui.text(this, "", 12f, Ui.PRIMARY)
-        progBar = Ui.progressBar(this)
-        progPercent = Ui.text(this, "", 26f, Ui.ON_SURFACE, bold = true)
-        col.addView(Ui.row(this, 10).apply {
-            addView(Ui.column(this@MainActivity, 0).apply {
-                addView(progName)
-                addView(progStage)
-            }, Ui.weighted())
-            addView(progPercent)
-        }, Ui.lp())
-        col.addView(progBar, Ui.lp(h = Ui.dp(this, 6)))
-        val (s1, v1) = stat(getString(R.string.stat_speed))
-        val (s2, v2) = stat(getString(R.string.stat_elapsed))
-        val (s3, v3) = stat(getString(R.string.stat_remaining))
-        val (s4, v4) = stat(getString(R.string.stat_original))
-        val (s5, v5) = stat(getString(R.string.stat_compressed))
-        val (s6, v6) = stat(getString(R.string.stat_saved))
-        statSpeed = v1; statElapsed = v2; statRemaining = v3
-        statOriginal = v4; statCompressed = v5; statSaved = v6
-        col.addView(Ui.row(this, 8).apply { addView(s1, Ui.weighted()); addView(s2, Ui.weighted()); addView(s3, Ui.weighted()) }, Ui.lp())
-        col.addView(Ui.row(this, 8).apply { addView(s4, Ui.weighted()); addView(s5, Ui.weighted()); addView(s6, Ui.weighted()) }, Ui.lp())
-        card.addView(col, Ui.lp())
-        return card
-    }
-
-    private fun buildControls(): View {
-        startButton = Ui.button(this, getString(R.string.action_start), Ui.Style.FILLED) { startConversion() }.apply { tag = "start" }
-        cancelButton = Ui.button(this, getString(R.string.action_cancel), Ui.Style.OUTLINED) { confirmCancel() }.apply { tag = "cancel" }
-        return Ui.row(this, 10).apply {
-            addView(startButton, LinearLayout.LayoutParams(0, Ui.dp(this@MainActivity, 52), 1.4f))
-            addView(cancelButton, LinearLayout.LayoutParams(0, Ui.dp(this@MainActivity, 52), 1f))
+            tabRow.addView(cell)
         }
     }
 
-    private fun buildQueue(): View {
-        val col = Ui.column(this, 8)
-        queueTitle = Ui.text(this, "", 15f, Ui.ON_SURFACE, bold = true)
-        clearButton = Ui.smallButton(this, getString(R.string.action_clear_finished), Ui.Style.TEXT) { clearFinished() }.apply { tag = "clear" }
-        col.addView(Ui.row(this, 8).apply {
-            addView(queueTitle, Ui.weighted())
-            addView(clearButton)
-        }, Ui.lp())
-        emptyQueue = Ui.text(this, getString(R.string.queue_empty), 13f, Ui.ON_SURFACE_VAR)
-        col.addView(emptyQueue)
-        queueList = Ui.column(this, 6)
-        col.addView(queueList, Ui.lp())
-        return col
+    fun showTab(i: Int) {
+        current = i.coerceIn(0, tabs.size - 1)
+        buildTabRow()
+        content.removeAllViews()
+        content.addView(tabs[current].build())
+        content.scrollTo(0, 0)
+        tabs[current].refresh()
+        updateBackHandling()
     }
 
-    // ================================================================== estado -> tela
+    private var lastQueueCount = -1
 
-    private fun updateOptionLabels() {
-        val tree = prefs.destinationTree
-        destButton.text = if (tree != null && Storage.hasTreePermission(this, tree))
-            getString(R.string.dest_label, Storage.treeDisplayName(contentResolver, tree))
-        else getString(R.string.dest_choose)
-
-        val t = prefs.threads
-        val clusters = CpuInfo.describeClusters()
-        threadsButton.text = if (t <= 0) {
-            if (clusters.isEmpty()) getString(R.string.threads_auto, CpuInfo.cores)
-            else getString(R.string.threads_auto_clusters, CpuInfo.cores, clusters)
-        } else resources.getQuantityString(R.plurals.threads_n, t, t)
-        dvdHunkButton.text = getString(R.string.hunk_dvd, hunkLabel(DiscMode.DVD, prefs.dvdHunk))
-        cdHunkButton.text = getString(R.string.hunk_cd, hunkLabel(DiscMode.CD, prefs.cdHunk))
-
-        // seletor de perfil (recriado só quando muda)
-        val p = prefs.profile
-        val focusedTag = profileBox.findFocus()?.tag
-        profileBox.removeAllViews()
-        val labels = listOf(getString(R.string.profile_fast), getString(R.string.profile_balanced), getString(R.string.profile_max))
-        profileBox.addView(Ui.segmented(this, labels, p.ordinal, "profile-") { i -> setProfile(Profile.values()[i]) }, Ui.lp())
-        if (focusedTag != null) profileBox.findViewWithTag<View>(focusedTag)?.requestFocus()
-        val dvd = CompressionParams.of(p, DiscMode.DVD, prefs.dvdHunk, prefs.cdHunk).describe(DiscMode.DVD)
-        val cd = CompressionParams.of(p, DiscMode.CD, prefs.dvdHunk, prefs.cdHunk).describe(DiscMode.CD)
-        val hint = when (p) {
-            Profile.FAST -> R.string.profile_fast_hint
-            Profile.BALANCED -> R.string.profile_balanced_hint
-            Profile.MAX -> R.string.profile_max_hint
+    fun refresh() {
+        if (!::tabs.isInitialized || !::content.isInitialized) return
+        val n = JobRepository.snapshot().size
+        if (n != lastQueueCount) {
+            lastQueueCount = n
+            val focused = tabRow.findFocus()?.tag
+            buildTabRow()
+            if (focused != null) tabRow.findViewWithTag<View>(focused)?.requestFocus()
         }
-        profileHint.text = getString(hint) + "\n" + getString(R.string.profile_params, dvd, cd)
-
-        val open = prefs.advancedOpen
-        advancedBox.visibility = if (open) View.VISIBLE else View.GONE
-        advancedToggle.text = getString(if (open) R.string.advanced_hide else R.string.advanced_show)
+        tabs[current].refresh()
     }
 
-    private fun hunkLabel(mode: DiscMode, bytes: Int): String = when {
-        bytes <= 0 -> getString(R.string.hunk_profile)
-        mode == DiscMode.CD -> getString(R.string.hunk_frames, bytes / CompressionParams.CD_FRAME)
-        else -> "${bytes / 1024} KiB"
-    }
+    // ================================================================== seletores (SAF)
 
-    private fun setProfile(p: Profile) {
-        if (prefs.profile == p) return
-        prefs.profile = p
-        updateOptionLabels()
-    }
-
-    private fun toggleAdvanced() {
-        prefs.advancedOpen = !prefs.advancedOpen
-        updateOptionLabels()
-    }
-
-    private fun cycleHunk(mode: DiscMode) {
-        val list = if (mode == DiscMode.DVD) CompressionParams.DVD_HUNKS else CompressionParams.CD_HUNKS
-        val cur = if (mode == DiscMode.DVD) prefs.dvdHunk else prefs.cdHunk
-        val next = list[(list.indexOf(cur).coerceAtLeast(0) + 1) % list.size]
-        if (mode == DiscMode.DVD) prefs.dvdHunk = next else prefs.cdHunk = next
-        updateOptionLabels()
-    }
-
-    private fun refresh() {
-        if (!::queueList.isInitialized) return
-        val jobs = JobRepository.snapshot()
-
-        // fila: adiciona/remove/reordena/atualiza cartões sem recriar os existentes
-        val ids = jobs.map { it.id }.toSet()
-        cards.keys.filter { it !in ids }.forEach { id -> cards.remove(id)?.let { queueList.removeView(it.view) } }
-        jobs.forEachIndexed { index, job ->
-            val card = cards.getOrPut(job.id) { JobCard(this, this) }
-            if (queueList.getChildAt(index) !== card.view) {
-                (card.view.parent as? ViewGroup)?.removeView(card.view)
-                queueList.addView(card.view, index, Ui.lp())
-            }
-            card.bind(job, index, jobs.size)
-        }
-        focusAfterRefresh?.let { (id, tag) ->
-            focusAfterRefresh = null
-            val v = cards[id]?.view
-            (v?.findViewWithTag<View>(tag) ?: v?.findViewWithTag<View>("log"))?.requestFocus()
-        }
-        emptyQueue.visibility = if (jobs.isEmpty()) View.VISIBLE else View.GONE
-        val ready = jobs.count { it.state == JobState.READY }
-        queueTitle.text = getString(R.string.queue_title, jobs.size)
-        clearButton.visibility = if (jobs.any { it.isFinished }) View.VISIBLE else View.GONE
-
-        // painel de progresso
-        val current = JobRepository.current()
-        val processing = JobRepository.processing
-        startButton.isEnabled = !processing && ready > 0
-        startButton.text = if (ready > 0) getString(R.string.action_start_n, ready) else getString(R.string.action_start)
-        cancelButton.isEnabled = processing
-        if (current != null) {
-            progName.text = current.displayName
-            val modeText = getString(if (current.mode == DiscMode.CD) R.string.mode_cd else R.string.mode_dvd)
-            val profileText = when (current.profile) {
-                Profile.FAST -> getString(R.string.profile_fast)
-                Profile.MAX -> getString(R.string.profile_max)
-                else -> getString(R.string.profile_balanced)
-            }
-            progStage.text = getString(
-                if (current.state == JobState.VERIFYING) R.string.stage_verifying else R.string.stage_compressing,
-                "$modeText · $profileText",
-            )
-            progBar.progress = (current.fraction * 1000).toInt()
-            progPercent.text = Format.percent(current.fraction)
-            val elapsed = (SystemClock.elapsedRealtime() - current.startedAt) / 1000
-            val remaining = if (current.speedBps > 0) ((current.bytesTotal - current.bytesDone) / current.speedBps).toLong() else -1L
-            statSpeed.text = Format.speed(current.speedBps)
-            statElapsed.text = Format.duration(elapsed)
-            statRemaining.text = Format.duration(remaining)
-            statOriginal.text = Format.bytes(current.inputBytes)
-            if (current.state == JobState.VERIFYING) {
-                statCompressed.text = Format.bytes(current.outputBytes)
-                showSaved(current.inputBytes, current.outputBytes, estimate = false)
-            } else {
-                statCompressed.text = Format.bytes(current.bytesWritten)
-                // estimativa do tamanho final a partir da taxa atual
-                if (current.fraction > 0.02) showSaved(current.inputBytes, (current.inputBytes * current.ratio).toLong(), estimate = true)
-                else statSaved.text = "—"
-            }
-        } else {
-            val done = jobs.filter { it.state == JobState.DONE }
-            progName.text = getString(if (processing) R.string.idle_starting else R.string.idle_title)
-            progStage.text = if (done.isEmpty()) getString(R.string.idle_hint) else getString(R.string.idle_done, done.size)
-            progBar.progress = if (done.isNotEmpty() && !jobs.any { it.state == JobState.READY }) 1000 else 0
-            progPercent.text = ""
-            statSpeed.text = "—"; statElapsed.text = "—"; statRemaining.text = "—"
-            val inSum = done.sumOf { it.inputBytes }
-            val outSum = done.sumOf { it.outputBytes }
-            statOriginal.text = if (done.isEmpty()) "—" else Format.bytes(inSum)
-            statCompressed.text = if (done.isEmpty()) "—" else Format.bytes(outSum)
-            if (done.isEmpty()) statSaved.text = "—" else showSaved(inSum, outSum, estimate = false)
-        }
-    }
-
-    private fun showSaved(input: Long, output: Long, estimate: Boolean) {
-        val saved = input - output
-        val pct = if (input > 0) Format.percent(saved.toDouble() / input) else "—"
-        statSaved.text = (if (estimate) "≈ " else "") + "${Format.bytes(saved)} ($pct)"
-        statSaved.setTextColor(if (saved >= 0) Ui.FG else Ui.WARN)
-    }
-
-    // ================================================================== ações
-
-    private fun pickFiles() {
+    fun pickFiles() {
         val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "*/*"
             putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            // escrita é pedida para permitir "Excluir original" quando o usuário ligar a opção
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
         launch(i, REQ_FILES)
     }
 
-    private fun pickInputFolder() {
+    fun pickInputFolder() {
         val i = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
         launch(i, REQ_INPUT_TREE)
     }
 
-    private fun pickDestination() {
+    fun pickDestination() {
         val i = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-            addFlags(
-                Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
-                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION,
-            )
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
         launch(i, REQ_DEST)
+    }
+
+    fun pickChd(onPicked: (InputFile) -> Unit) {
+        onChdPicked = onPicked
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }
+        launch(i, REQ_CHD)
     }
 
     private fun launch(i: Intent, req: Int) {
@@ -492,69 +255,87 @@ class MainActivity : Activity(), JobCard.Actions {
                 val uris = ArrayList<Uri>()
                 data.clipData?.let { clip -> for (k in 0 until clip.itemCount) clip.getItemAt(k).uri?.let { uris.add(it) } }
                 if (uris.isEmpty()) data.data?.let { uris.add(it) }
-                uris.forEach { Storage.takeReadPermission(this, it) }
-                addInputs { uris.mapNotNull { Storage.describe(contentResolver, it) } }
+                uris.forEach { Storage.takeInputPermission(this, it) }
+                addInputs(null) { uris.mapNotNull { Storage.describe(contentResolver, it) } }
             }
             REQ_INPUT_TREE -> {
                 val tree = data.data ?: return
-                Storage.takeReadPermission(this, tree)
-                addInputs { Storage.listTree(contentResolver, tree) }
+                Storage.takeInputPermission(this, tree)
+                addInputs(tree) { Storage.listTree(contentResolver, tree) }
             }
             REQ_DEST -> {
                 val tree = data.data ?: return
                 Storage.takeReadWritePermission(this, tree)
                 prefs.destinationTree = tree
-                updateOptionLabels()
+                refresh()
                 if (startAfterDestination) {
                     startAfterDestination = false
-                    startConversion()
+                    startQueue()
                 }
+            }
+            REQ_CHD -> {
+                val uri = data.data ?: return
+                Storage.takeInputPermission(this, uri)
+                val f = Storage.describe(contentResolver, uri) ?: return
+                if (Storage.extension(f.name) != "chd") {
+                    toast(getString(R.string.toast_not_chd))
+                    return
+                }
+                onChdPicked?.invoke(f)
             }
         }
     }
 
     /** Agrupa e analisa em segundo plano; a fila é atualizada conforme cada item fica pronto. */
-    private fun addInputs(load: () -> List<InputFile>) {
+    private fun addInputs(tree: Uri?, load: () -> List<InputFile>) {
         val appCtx = applicationContext
         App.background.execute {
             val files = load()
-            val resolved = SourceResolver.resolve(appCtx, files) { JobRepository.nextId() }
-            JobRepository.add(resolved.jobs)
+            val resolved = SourceResolver.resolve(appCtx, files, tree, JobRepository::isDuplicate) { JobRepository.nextId() }
+            JobRepository.add(resolved.jobs, resolved.groups)
             runOnUiThread {
-                when {
-                    resolved.jobs.isEmpty() -> toast(getString(R.string.toast_nothing_added))
-                    resolved.ignored.isNotEmpty() -> toast(resources.getQuantityString(R.plurals.toast_ignored, resolved.ignored.size, resolved.ignored.size))
-                }
+                val msgs = ArrayList<String>()
+                if (resolved.jobs.isEmpty() && resolved.duplicates.isEmpty()) msgs.add(getString(R.string.toast_nothing_added))
+                if (resolved.duplicates.isNotEmpty()) msgs.add(resources.getQuantityString(R.plurals.toast_duplicates, resolved.duplicates.size, resolved.duplicates.size))
+                if (resolved.ignored.isNotEmpty()) msgs.add(resources.getQuantityString(R.plurals.toast_ignored, resolved.ignored.size, resolved.ignored.size))
+                if (resolved.groups.isNotEmpty()) msgs.add(resources.getQuantityString(R.plurals.toast_m3u, resolved.groups.size, resolved.groups.size))
+                if (msgs.isNotEmpty()) toast(msgs.joinToString("\n"))
             }
             for (job in resolved.jobs) {
-                val a = Analyzer.analyze(appCtx, job)
-                job.analysis = a
-                job.mode = a.recommended
-                job.state = if (a.error == null && a.recommended != null) JobState.READY else JobState.BLOCKED
-                job.log("Análise: ${a.summary}")
-                a.warnings.forEach { job.log("Aviso: $it") }
-                a.error?.let { job.log("Erro: $it") }
-                JobRepository.changed()
+                Analyzer.analyzeAndApply(appCtx, job)
+                JobRepository.persist()
             }
         }
     }
 
-    private fun cycleThreads() {
-        val cores = Runtime.getRuntime().availableProcessors()
-        val options = listOf(0) + (1..cores)
-        val idx = options.indexOf(prefs.threads).let { if (it < 0) 0 else it }
-        prefs.threads = options[(idx + 1) % options.size]
-        updateOptionLabels()
+    /** Coloca na fila uma operação de ferramenta (verificar, recompactar, extrair) sobre um CHD. */
+    fun enqueueTool(file: InputFile, op: Operation) {
+        if (JobRepository.isDuplicate(file, op)) {
+            toast(resources.getQuantityString(R.plurals.toast_duplicates, 1, 1))
+            return
+        }
+        val job = Job(JobRepository.nextId(), SourceKind.CHD, file, emptyList(), op)
+        JobRepository.add(listOf(job))
+        val appCtx = applicationContext
+        App.background.execute {
+            Analyzer.analyzeAndApply(appCtx, job)
+            JobRepository.persist()
+        }
+        toast(getString(R.string.toast_tool_queued, Labels.operation(this, op)))
+        showTab(0)
     }
 
-    private fun startConversion() {
+    // ================================================================== fila
+
+    fun startQueue() {
         if (JobRepository.processing) return
         if (!JobRepository.hasReady()) {
             toast(getString(R.string.toast_nothing_ready))
             return
         }
+        val needsDest = JobRepository.snapshot().any { it.state == JobState.READY && it.operation != Operation.VERIFY }
         val tree = prefs.destinationTree
-        if (tree == null || !Storage.hasTreePermission(this, tree)) {
+        if (needsDest && (tree == null || !Storage.hasTreePermission(this, tree))) {
             toast(getString(R.string.toast_choose_dest))
             startAfterDestination = true
             pickDestination()
@@ -563,6 +344,31 @@ class MainActivity : Activity(), JobCard.Actions {
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIF)
         }
+        if (needsDest && tree != null) {
+            // estimativa conservadora: a saída pode ocupar até o tamanho da entrada
+            val estimate = JobRepository.snapshot().filter { it.state == JobState.READY && it.operation != Operation.VERIFY }
+                .sumOf { it.analysis?.outputEstimate?.takeIf { e -> e > 0 } ?: it.inputBytes }
+            App.background.execute {
+                val free = Storage.freeSpaceOf(contentResolver, Storage.root(tree))
+                runOnUiThread {
+                    if (free in 0 until estimate) {
+                        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                            .setTitle(R.string.space_title)
+                            .setMessage(getString(R.string.space_message, Format.bytes(free), Format.bytes(estimate)))
+                            .setPositiveButton(R.string.space_continue) { _, _ -> launchService() }
+                            .setNegativeButton(R.string.cancel_keep, null)
+                            .show()
+                    } else {
+                        launchService()
+                    }
+                }
+            }
+        } else {
+            launchService()
+        }
+    }
+
+    private fun launchService() {
         try {
             ConversionService.start(this)
         } catch (e: Exception) {
@@ -570,7 +376,7 @@ class MainActivity : Activity(), JobCard.Actions {
         }
     }
 
-    private fun confirmCancel() {
+    fun confirmCancelQueue() {
         if (!JobRepository.processing) return
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
             .setTitle(R.string.cancel_title)
@@ -580,21 +386,44 @@ class MainActivity : Activity(), JobCard.Actions {
             .show()
     }
 
-    private fun clearFinished() {
+    fun cancelCurrentItem() {
+        if (JobRepository.processing) ConversionService.cancelCurrent()
+    }
+
+    fun clearFinished() {
         JobRepository.clearFinished().forEach { releaseInputs(it) }
     }
 
     private fun releaseInputs(job: Job) {
-        Storage.releasePermission(this, job.main.uri)
-        job.tracks.forEach { t -> t.file?.let { Storage.releasePermission(this, it.uri) } }
+        // mantém permissões ainda usadas por outros itens
+        job.inputFiles.forEach { f -> if (JobRepository.jobsReferencing(f.uri, job.id).isEmpty()) Storage.releasePermission(this, f.uri) }
     }
 
-    // JobCard.Actions
+    /** Abre a pasta de destino no gerenciador de arquivos (quando o aparelho suportar). */
+    fun openDestination() {
+        val tree = prefs.destinationTree ?: return
+        val doc = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+        val intents = listOf(
+            Intent(Intent.ACTION_VIEW).setDataAndType(doc, DocumentsContract.Document.MIME_TYPE_DIR),
+            Intent(Intent.ACTION_VIEW, doc),
+        ).map { it.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        for (i in intents) {
+            try {
+                startActivity(i)
+                return
+            } catch (e: Exception) {
+            }
+        }
+        toast(getString(R.string.toast_open_folder_unsupported, Storage.treeDisplayName(contentResolver, tree)))
+    }
+
+    // ================================================================== JobCard.Actions
+
     override fun setMode(job: Job, mode: DiscMode) {
         if (job.analysis?.allowedModes?.contains(mode) == true && !job.isActive) {
             job.mode = mode
             job.log("Modo alterado para ${mode.name}")
-            JobRepository.changed()
+            JobRepository.persist()
         }
     }
 
@@ -605,77 +434,147 @@ class MainActivity : Activity(), JobCard.Actions {
     override fun retry(job: Job) = JobRepository.retry(job.id)
 
     override fun move(job: Job, delta: Int) {
-        focusAfterRefresh = job.id to (if (delta < 0) "up" else "down")
+        (tabs[1] as? QueueTab)?.focusAfterMove(job.id, delta)
         JobRepository.move(job.id, delta)
     }
 
-    override fun showLog(job: Job) {
-        val tv = Ui.text(this, job.logText().ifEmpty { getString(R.string.log_empty) }, 12f, Ui.ON_SURFACE).apply {
+    override fun confirmDelete(job: Job) {
+        val files = job.deleteCandidates
+        if (files.isEmpty()) return
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle(R.string.delete_confirm_title)
+            .setMessage(getString(R.string.delete_confirm_message, job.outputName ?: "", files.joinToString("\n") { "• ${it.name}" }))
+            .setPositiveButton(R.string.action_delete_original) { _, _ ->
+                App.background.execute {
+                    // a confirmação reavalia todas as condições antes de apagar
+                    val plan = Deletion.plan(this, job, prefs)
+                    if (plan.allowed && plan.files.map { it.uri }.toSet() == files.map { it.uri }.toSet()) {
+                        Deletion.execute(this, job)
+                    } else {
+                        job.deleteState = DeleteState.KEPT
+                        job.deleteNote = plan.reason ?: getString(R.string.keep_changed)
+                        job.deleteCandidates = emptyList()
+                    }
+                    JobRepository.persist()
+                }
+            }
+            .setNegativeButton(R.string.cancel_keep, null)
+            .show()
+    }
+
+    override fun keepOriginal(job: Job) {
+        job.deleteState = DeleteState.KEPT
+        job.deleteNote = getString(R.string.keep_user)
+        job.deleteCandidates = emptyList()
+        JobRepository.persist()
+    }
+
+    override fun showLog(job: Job) = showText(job.displayName, job.logText().ifEmpty { getString(R.string.log_empty) })
+
+    /** Diálogo com texto selecionável, botões Copiar e Compartilhar. */
+    fun showText(title: String, text: String) {
+        val tv = Ui.text(this, text, 12f, Ui.FG).apply {
             typeface = Typeface.MONOSPACE
             setTextIsSelectable(true)
             val p = Ui.dp(this@MainActivity, 16)
             setPadding(p, p, p, p)
         }
-        val sv = ScrollView(this).apply { addView(tv) }
         AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
-            .setTitle(job.displayName)
-            .setView(sv)
+            .setTitle(title)
+            .setView(ScrollView(this).apply { addView(tv) })
             .setPositiveButton(R.string.action_copy) { _, _ ->
-                val cm = getSystemService(ClipboardManager::class.java)
-                cm.setPrimaryClip(ClipData.newPlainText("log", job.logText()))
+                getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(title, text))
                 toast(getString(R.string.toast_copied))
             }
+            .setNeutralButton(R.string.action_share) { _, _ ->
+                val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_SUBJECT, title).putExtra(Intent.EXTRA_TEXT, text)
+                try {
+                    startActivity(Intent.createChooser(send, title))
+                } catch (e: Exception) {
+                    toast(getString(R.string.err_no_share))
+                }
+            }
             .setNegativeButton(R.string.action_close, null)
+            .show()
+    }
+
+    fun confirm(title: Int, message: String, positive: Int, action: () -> Unit) {
+        AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton(positive) { _, _ -> action() }
+            .setNegativeButton(R.string.cancel_keep, null)
             .show()
     }
 
     // ================================================================== controles físicos
 
     /**
-     * Gamepads (XInput e similares): A confirma, B volta, Start inicia,
-     * X adiciona arquivos, Y cancela (com confirmação), Select abre o log do item atual,
-     * L1/R1 trocam o perfil de compactação.
-     * O D-pad e o analógico navegam pelo foco padrão do Android.
+     * Gamepads (XInput e similares): A confirma, B volta, Start inicia a fila,
+     * X adiciona arquivos, Y cancela a fila (com confirmação), Select abre o log
+     * do item atual, L1/R1 trocam de seção. D-pad e analógico movem o foco.
      */
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        val mapped = when (event.keyCode) {
-            KeyEvent.KEYCODE_BUTTON_A -> KeyEvent.KEYCODE_DPAD_CENTER
-            KeyEvent.KEYCODE_BUTTON_B -> KeyEvent.KEYCODE_BACK
-            else -> 0
-        }
+        val mapped = if (event.keyCode == KeyEvent.KEYCODE_BUTTON_A) KeyEvent.KEYCODE_DPAD_CENTER else 0
         if (mapped != 0) {
             return super.dispatchKeyEvent(
                 KeyEvent(event.downTime, event.eventTime, event.action, mapped, event.repeatCount, event.metaState,
                     event.deviceId, event.scanCode, event.flags, event.source),
             )
         }
-        if (event.action == KeyEvent.ACTION_UP) {
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_BUTTON_START -> { startConversion(); return true }
-                KeyEvent.KEYCODE_BUTTON_X -> { pickFiles(); return true }
-                KeyEvent.KEYCODE_BUTTON_Y -> { confirmCancel(); return true }
-                KeyEvent.KEYCODE_BUTTON_SELECT -> {
-                    (JobRepository.current() ?: JobRepository.snapshot().lastOrNull())?.let { showLog(it) }
-                    return true
+        val handled = setOf(
+            KeyEvent.KEYCODE_BUTTON_B,
+            KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BUTTON_X, KeyEvent.KEYCODE_BUTTON_Y,
+            KeyEvent.KEYCODE_BUTTON_SELECT, KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_BUTTON_R1,
+        )
+        if (event.keyCode in handled) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_BUTTON_B -> if (current != 0) showTab(0) else finish()
+                    KeyEvent.KEYCODE_BUTTON_START -> startQueue()
+                    KeyEvent.KEYCODE_BUTTON_X -> pickFiles()
+                    KeyEvent.KEYCODE_BUTTON_Y -> confirmCancelQueue()
+                    KeyEvent.KEYCODE_BUTTON_SELECT -> (JobRepository.current() ?: JobRepository.snapshot().lastOrNull())?.let { showLog(it) }
+                    KeyEvent.KEYCODE_BUTTON_L1 -> showTab((current + tabs.size - 1) % tabs.size)
+                    KeyEvent.KEYCODE_BUTTON_R1 -> showTab((current + 1) % tabs.size)
                 }
-                KeyEvent.KEYCODE_BUTTON_L1 -> { setProfile(Profile.values()[(prefs.profile.ordinal + 2) % 3]); return true }
-                KeyEvent.KEYCODE_BUTTON_R1 -> { setProfile(Profile.values()[(prefs.profile.ordinal + 1) % 3]); return true }
             }
-        } else if (event.action == KeyEvent.ACTION_DOWN) {
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_BUTTON_START, KeyEvent.KEYCODE_BUTTON_X, KeyEvent.KEYCODE_BUTTON_Y,
-                KeyEvent.KEYCODE_BUTTON_SELECT, KeyEvent.KEYCODE_BUTTON_L1, KeyEvent.KEYCODE_BUTTON_R1 -> return true
-            }
+            return true
         }
         return super.dispatchKeyEvent(event)
     }
 
-    private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
+    // "Voltar" (gesto, botão ou B): de outra seção volta para Conversão; na Conversão sai.
+    // Android 13+ usa OnBackInvokedCallback (obrigatório com o voltar preditivo do Android 16).
+    private var backCallback: Any? = null
+
+    private fun updateBackHandling() {
+        if (Build.VERSION.SDK_INT < 33) return
+        val dispatcher = onBackInvokedDispatcher
+        val cb = backCallback as? android.window.OnBackInvokedCallback
+        if (current != 0 && cb == null) {
+            val newCb = android.window.OnBackInvokedCallback { showTab(0) }
+            dispatcher.registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT, newCb)
+            backCallback = newCb
+        } else if (current == 0 && cb != null) {
+            dispatcher.unregisterOnBackInvokedCallback(cb)
+            backCallback = null
+        }
+    }
+
+    @Deprecated("Somente Android 10-12; nas versões novas o callback acima é usado")
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        if (current != 0) showTab(0) else super.onBackPressed()
+    }
+
+    fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_LONG).show()
 
     companion object {
         private const val REQ_FILES = 10
         private const val REQ_INPUT_TREE = 11
         private const val REQ_DEST = 12
         private const val REQ_NOTIF = 13
+        private const val REQ_CHD = 14
     }
 }

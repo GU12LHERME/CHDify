@@ -18,7 +18,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.ConversorCHD">
+        android:theme="@style/Theme.CHDify">
 
         <activity
             android:name=".ui.MainActivity"
