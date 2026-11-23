@@ -172,6 +172,12 @@ x86_64 (GCC e Clang/libc++) e em ARM64 (compilação cruzada executada no QEMU):
 - Extração pelo motor: ISO, `.cue`/`.bin` e `.gdi` idênticos aos do chdman oficial (inclusive GD-ROM) e trilhas
   idênticas às originais; recompactação equivalente a `chdman copy`.
 
+Sanitizadores (CHDify 1.0.0): a suíte completa passa com ASan + UBSan (86/86). Os únicos avisos vêm de código
+original do MAME e foram suprimidos apenas na análise: alinhamento de 4 bytes dos alocadores de codec do MAME
+(zlib/LZMA; acesso desalinhado a memória normal é permitido em ARM64 e x86-64) e corridas apontadas pelo TSan no
+compressor `chd_file_compressor` / `osdsync` (o mesmo código do chdman oficial). Com essas supressões, o TSan não
+encontra nenhuma corrida no código do CHDify (verificação e extração paralelas, recompactação).
+
 Para executar localmente:
 
 ```bash
