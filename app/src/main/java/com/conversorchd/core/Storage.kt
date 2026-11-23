@@ -81,6 +81,14 @@ object Storage {
         return Folder(parent.tree, created, join(parent.path, describe(cr, created)?.name ?: clean))
     }
 
+    /** Cria sempre uma pasta nova (nunca reutiliza uma existente). */
+    fun newFolder(cr: ContentResolver, parent: Folder, name: String): Folder {
+        val clean = safeName(name)
+        val created = DocumentsContract.createDocument(cr, parent.docUri, DocumentsContract.Document.MIME_TYPE_DIR, clean)
+            ?: throw FileNotFoundException("não foi possível criar a pasta $clean")
+        return Folder(parent.tree, created, join(parent.path, describe(cr, created)?.name ?: clean))
+    }
+
     private fun join(a: String, b: String) = if (a.isEmpty()) b else "$a/$b"
 
     /** Remove caracteres que provedores de arquivos costumam recusar. */

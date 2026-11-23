@@ -14,6 +14,7 @@ import com.conversorchd.R
  *  5. para .cue/.gdi (vários arquivos): o item veio de "Adicionar pasta", e
  *     nenhuma outra folha (.cue/.gdi) ou playlist (.m3u) dessa pasta referencia
  *     as mesmas trilhas; sem acesso à pasta não há como garantir isso;
+ *     (o mesmo vale para CHD de origem, por causa das playlists .m3u);
  *  6. para arquivo único: nenhuma folha ou playlist da pasta de origem
  *     (quando conhecida) o referencia;
  *  7. o provedor de arquivos permite excluir cada documento.
@@ -49,7 +50,8 @@ object Deletion {
 
         val multi = job.kind == SourceKind.CUE || job.kind == SourceKind.GDI
         val tree = job.sourceTree
-        if (multi && tree == null) return keep(R.string.keep_need_folder)
+        // CHDs costumam ser referenciados por playlists .m3u: sem a pasta não há como conferir
+        if ((multi || job.kind == SourceKind.CHD) && tree == null) return keep(R.string.keep_need_folder)
         if (tree != null) {
             val ours = files.map { it.uri }.toSet()
             val ourNames = files.map { it.name.lowercase() }.toSet()

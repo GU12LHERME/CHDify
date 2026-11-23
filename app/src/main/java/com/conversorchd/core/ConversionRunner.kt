@@ -165,7 +165,10 @@ class ConversionRunner(private val ctx: Context, private val prefs: Prefs, priva
         var dirName = base
         var n = 2
         while (dirName.lowercase() in existingDirs) dirName = "$base (${n++})"
-        val folder = Storage.childFolder(cr, parent, dirName)
+        // pasta nova, criada por esta operação: se ela falhar, a pasta inteira é removida
+        val folder = Storage.newFolder(cr, parent, dirName)
+        created.add(folder.docUri)
+        prefs.addPendingOutput(folder.docUri.toString())
         job.outputFolder = folder.path
         job.log("Destino: ${folder.path}/ (${names.size + 1} arquivos)")
 
@@ -193,6 +196,8 @@ class ConversionRunner(private val ctx: Context, private val prefs: Prefs, priva
         if (!Storage.writeText(cr, sheetOut.uri, sheet)) throw Abort(JobState.FAILED, ctx.getString(R.string.err_io, sheetName))
         outs.forEach { renameFinal(job, it) }
         val sheetUri = renameFinal(job, sheetOut)
+        created.remove(folder.docUri)
+        prefs.removePendingOutput(folder.docUri.toString())
         job.outputUri = sheetUri
         job.outputName = sheetName
         job.outputBytes = sizes.sum() + sheet.toByteArray().size
@@ -288,7 +293,8 @@ class ConversionRunner(private val ctx: Context, private val prefs: Prefs, priva
     }
 
     private fun cleanupCreated(job: Job) {
-        for (u in created.toList()) {
+        // ordem inversa: arquivos antes da pasta que os contém
+        for (u in created.toList().asReversed()) {
             val deleted = Storage.deleteDocument(cr, u)
             job.log(if (deleted) "Arquivo parcial removido" else "Não foi possível remover um arquivo parcial (será removido na próxima abertura)")
             if (deleted) prefs.removePendingOutput(u.toString())
