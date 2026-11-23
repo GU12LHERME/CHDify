@@ -56,6 +56,24 @@ object NativeChd {
         listener: NativeListener?,
     ): String
 
+    /**
+     * CHD de DVD -> ISO (equivale a "chdman extractdvd"). O SHA-1 dos dados extraídos
+     * é comparado com o gravado no CHD; sucesso significa cópia verificada.
+     */
+    @JvmStatic external fun extractDvd(chdFd: Int, outFd: Int, threads: Int, listener: NativeListener?): String
+
+    /**
+     * Plano de extração de CD/GD-ROM: nomes dos arquivos, tamanhos e o texto exato
+     * da folha (.cue, ou .gdi para GD-ROM), como o "chdman extractcd" geraria.
+     */
+    @JvmStatic external fun planCdExtract(chdFd: Int, baseName: String): String
+
+    /** Executa o plano: outFds na mesma ordem de "files". */
+    @JvmStatic external fun extractCd(chdFd: Int, baseName: String, outFds: IntArray, listener: NativeListener?): String
+
+    /** Recompacta um CHD (equivale a "chdman copy"); hunk 0 e codecs vazio = padrões do tipo de mídia. */
+    @JvmStatic external fun recompress(inFd: Int, outFd: Int, threads: Int, hunkBytes: Int, codecs: String, listener: NativeListener?): String
+
     /** Verificação completa do CHD (equivale a "chdman verify"), com descompressão em paralelo. */
     @JvmStatic external fun verify(fd: Int, threads: Int, listener: NativeListener?): String
 }

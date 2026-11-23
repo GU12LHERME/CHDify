@@ -277,4 +277,49 @@ Java_com_conversorchd_nativebridge_NativeChd_verify(JNIEnv *env, jclass, jint fd
 	return to_j(env, result_json(r));
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_conversorchd_nativebridge_NativeChd_extractDvd(JNIEnv *env, jclass, jint chdFd, jint outFd, jint threads, jobject listener)
+{
+	g_cancel.store(false);
+	ListenerBridge bridge(env, listener);
+	Result const r = extract_dvd(chdFd, outFd, bridge.options(threads));
+	bridge.flush_logs();
+	ALOGI("extractDvd resultado=%d %s", int(r.code), r.message.c_str());
+	return to_j(env, result_json(r));
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_conversorchd_nativebridge_NativeChd_planCdExtract(JNIEnv *env, jclass, jint chdFd, jstring baseName)
+{
+	return to_j(env, plan_cd_extract_json(chdFd, to_std(env, baseName)));
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_conversorchd_nativebridge_NativeChd_extractCd(JNIEnv *env, jclass, jint chdFd, jstring baseName, jintArray outFds, jobject listener)
+{
+	g_cancel.store(false);
+	ListenerBridge bridge(env, listener);
+	jsize const n = outFds ? env->GetArrayLength(outFds) : 0;
+	std::vector<jint> raw(n);
+	if (n > 0)
+		env->GetIntArrayRegion(outFds, 0, n, raw.data());
+	std::vector<int> fds(raw.begin(), raw.end());
+	Result const r = extract_cd(chdFd, to_std(env, baseName), fds, bridge.options(1));
+	bridge.flush_logs();
+	ALOGI("extractCd resultado=%d %s", int(r.code), r.message.c_str());
+	return to_j(env, result_json(r));
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_conversorchd_nativebridge_NativeChd_recompress(JNIEnv *env, jclass, jint inFd, jint outFd, jint threads, jint hunk,
+		jstring codecs, jobject listener)
+{
+	g_cancel.store(false);
+	ListenerBridge bridge(env, listener);
+	Result const r = recompress(inFd, outFd, bridge.options(threads, hunk, to_std(env, codecs)));
+	bridge.flush_logs();
+	ALOGI("recompress resultado=%d %s", int(r.code), r.message.c_str());
+	return to_j(env, result_json(r));
+}
+
 } // extern "C"

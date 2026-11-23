@@ -32,6 +32,7 @@ enum class Stage : int
 {
 	COMPRESS = 0,
 	VERIFY = 1,
+	EXTRACT = 2,
 };
 
 struct Progress
@@ -96,6 +97,28 @@ Result convert_cd(std::string const &toc_path, std::vector<TrackFd> const &track
 // Verificação completa (equivalente a "chdman verify"): descomprime todos os
 // hunks, recalcula o SHA-1 dos dados e o SHA-1 global com metadados.
 Result verify(int chd_fd, Options const &opt);
+
+// ---------------------------------------------------------------------------
+//  Extração e recompactação
+// ---------------------------------------------------------------------------
+
+// CHD de DVD -> ISO (equivale a "chdman extractdvd"). Os hunks são lidos em
+// paralelo e o SHA-1 dos dados extraídos é comparado com o SHA-1 gravado no
+// CHD: uma extração com sucesso é, por construção, uma cópia verificada.
+Result extract_dvd(int chd_fd, int out_fd, Options const &opt);
+
+// Plano de extração de CD (equivale a "chdman extractcd"): nomes dos arquivos
+// de saída, tamanho de cada um e o texto exato da folha (.cue ou, para GD-ROM,
+// .gdi), calculados sem ler os dados. JSON com "files", "sizes", "sheet",
+// "sheetExt", "gdrom", "tracks" e "subcodeDropped".
+std::string plan_cd_extract_json(int chd_fd, std::string const &base_name);
+
+// Executa a extração planejada: out_fds na mesma ordem de "files" do plano.
+Result extract_cd(int chd_fd, std::string const &base_name, std::vector<int> const &out_fds, Options const &opt);
+
+// Recompacta um CHD em outro (equivale a "chdman copy"): metadados copiados,
+// codecs/hunk de Options (vazio = padrões do tipo de mídia, como no chdman).
+Result recompress(int in_fd, int out_fd, Options const &opt);
 
 // Informações de um CHD (versão, tipo, tamanho lógico, SHA-1) em JSON.
 std::string chd_info_json(int chd_fd);

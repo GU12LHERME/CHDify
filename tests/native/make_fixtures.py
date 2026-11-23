@@ -11,6 +11,7 @@ Imagens geradas:
   mixed.cue + mixed (Track 01..03).bin   CD com trilha de dados MODE1/2352 + 2 trilhas de áudio
   single.cue + single.bin               mesmo disco em um único .bin (INDEX com deslocamentos)
   wav.cue + wav_track*.wav              mesmo disco com áudio em arquivos WAVE
+  gd.gdi + gd_track0*.{bin,raw}         GD-ROM (Dreamcast) com área de alta densidade
   odd_size.bin     tamanho não múltiplo de 2048 (inválido)
   truncated.iso    ISO cortada (PVD declara mais setores do que existem)
   big_4g.iso       (--big) ISO esparsa de ~4,3 GB com dados aleatórios além de 4 GiB
@@ -153,6 +154,20 @@ with open(os.path.join(OUT, "wav.cue"), "w", newline="\r\n") as f:
     f.write(f'FILE "{names[0]}" BINARY\n  TRACK 01 MODE1/2352\n    INDEX 01 00:00:00\n')
     f.write('FILE "wav_track2.wav" WAVE\n  TRACK 02 AUDIO\n    INDEX 00 00:00:00\n    INDEX 01 00:02:00\n')
     f.write('FILE "wav_track3.wav" WAVE\n  TRACK 03 AUDIO\n    INDEX 01 00:00:00\n')
+
+# ---------------- GD-ROM (Dreamcast) ----------------
+# área de baixa densidade: trilha 1 (dados) + trilha 2 (áudio); área de alta
+# densidade a partir do LBA 45000: trilha 3 (dados)
+gd1 = make_iso("gd_t1.iso", [("/LEIAME.TXT", b"GD-ROM de teste\n"), ("/A.BIN", blob(600 * 2048))], vol_ident="GD_LOW")
+gd3 = make_iso("gd_t3.iso", [("/1ST_READ.BIN", blob(1800 * 2048))], vol_ident="GD_HIGH")
+for src, name in ((gd1, "gd_track01.bin"), (gd3, "gd_track03.bin")):
+    with open(src, "rb") as fsrc, open(os.path.join(OUT, name), "wb") as fdst:
+        fdst.write(raw_mode1(fsrc.read()))
+    os.remove(src)
+with open(os.path.join(OUT, "gd_track02.raw"), "wb") as f:
+    f.write(audio_track(8, 523))
+with open(os.path.join(OUT, "gd.gdi"), "w", newline="\r\n") as f:
+    f.write("3\n1 0 4 2352 gd_track01.bin 0\n2 1000 0 2352 gd_track02.raw 0\n3 45000 4 2352 gd_track03.bin 0\n")
 
 # ---------------- inválidos ----------------
 with open(os.path.join(OUT, "odd_size.bin"), "wb") as f:

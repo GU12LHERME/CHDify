@@ -27,6 +27,7 @@
 
 #include <chrono>
 #include <condition_variable>
+#include <functional>
 #include <map>
 #include <thread>
 #include <mutex>
@@ -584,8 +585,12 @@ struct VerifyOutcome
 	std::uint64_t err_offset = 0;
 	bool cancelled = false;
 	bool alloc_failed = false;
+	bool sink_failed = false;   // erro de gravação no destino (extração)
 	util::sha1_t sha1;
 };
+
+// Recebe os blocos descomprimidos em ordem (extração grava no destino).
+using ChunkSink = std::function<std::error_condition(std::uint64_t offset, std::uint8_t const *data, std::uint32_t length)>;
 
 int verify_workers(chd_file &chd, Options const &opt)
 {
@@ -599,7 +604,8 @@ int verify_workers(chd_file &chd, Options const &opt)
 	return workers;
 }
 
-VerifyOutcome parallel_verify(int fd, chd_file &primary, int workers, Options const &opt, Throttle &throttle)
+VerifyOutcome parallel_verify(int fd, chd_file &primary, int workers, Options const &opt, Throttle &throttle,
+		Stage stage = Stage::VERIFY, ChunkSink const &sink = {})
 {
 	VerifyOutcome out;
 	std::uint64_t const total = primary.logical_bytes();
@@ -706,7 +712,21 @@ VerifyOutcome parallel_verify(int fd, chd_file &primary, int workers, Options co
 		std::uint64_t const off = c * chunk;
 		std::uint32_t const n = std::uint32_t(std::min<std::uint64_t>(chunk, total - off));
 		sha.append(buf[c % slots].data(), n);
-		emit(opt, throttle, Stage::VERIFY, double(off + n) / double(total), 1.0, total);
+		if (sink)
+		{
+			std::error_condition const se = sink(off, buf[c % slots].data(), n);
+			if (se)
+			{
+				std::lock_guard<std::mutex> lock(m);
+				out.err = se;
+				out.err_offset = off;
+				out.sink_failed = true;
+				stop = true;
+				cv_free.notify_all();
+				break;
+			}
+		}
+		emit(opt, throttle, stage, double(off + n) / double(total), 1.0, total, false, sink ? off + n : 0);
 		{
 			std::lock_guard<std::mutex> lock(m);
 			ready[c % slots] = -1;
@@ -1066,6 +1086,522 @@ Result verify(int chd_fd, Options const &opt)
 		log(opt, "Overall SHA1 verification successful! " + overall.as_string());
 	}
 	r.code = ResultCode::OK;
+	return r;
+}
+
+// ===========================================================================
+//  Extração e recompactação
+// ===========================================================================
+
+namespace {
+
+std::error_condition open_chd(int fd, chd_file &chd)
+{
+	std::error_condition err;
+	auto file = FdFile::from_fd(fd, false, err);
+	if (!file)
+		return err;
+	return chd.open(std::move(file));
+}
+
+bool has_cd_metadata(chd_file &chd)
+{
+	std::string meta;
+	for (chd_metadata_tag tag : { CDROM_TRACK_METADATA2_TAG, CDROM_TRACK_METADATA_TAG, CDROM_OLD_METADATA_TAG,
+			GDROM_TRACK_METADATA_TAG, GDROM_OLD_METADATA_TAG })
+		if (!chd.read_metadata(tag, 0, meta))
+			return true;
+	return false;
+}
+
+// Plano de extração de CD, com as mesmas regras de nomes e de folha do
+// do_extract_cd() do chdman:
+//  - GD-ROM -> .gdi com uma trilha por arquivo ("Nome01.bin", "Nome02.raw"...);
+//  - CD de uma trilha -> "Nome.bin" + .cue;
+//  - CD com várias trilhas -> "Nome (Track N).bin" + .cue (padrão Redump).
+// Subcódigo, se existir, não cabe em .cue/.gdi e é omitido (como no chdman).
+struct CdPlan
+{
+	bool gdi = false;
+	bool split = false;
+	int tracks = 0;
+	bool subcode_dropped = false;
+	std::vector<std::string> track_file;   // nome por trilha
+	std::vector<std::string> files;        // nomes únicos, em ordem
+	std::vector<std::uint64_t> sizes;      // tamanho final de cada arquivo
+	std::string sheet;
+	std::uint64_t total_bytes = 0;
+};
+
+CdPlan make_cd_plan(chd_file &chd, cdrom_file &cdrom, std::string const &base_in)
+{
+	CdPlan p;
+	cdrom_file::toc const &toc = cdrom.get_toc();
+	std::string base = base_in;
+	for (char &c : base)
+		if (c == '"')
+			c = '\'';
+	p.gdi = cdrom.is_gdrom();
+	p.tracks = toc.numtrks;
+	p.split = p.gdi || toc.numtrks > 1;
+	int const mode = p.gdi ? MODE_GDI : MODE_CUEBIN;
+
+	for (int t = 0; t < toc.numtrks; ++t)
+	{
+		std::string name;
+		if (p.gdi)
+			name = util::string_format("%s%02d%s", base, t + 1, toc.tracks[t].trktype == cdrom_file::CD_TRACK_AUDIO ? ".raw" : ".bin");
+		else if (p.split)
+			name = util::string_format(toc.numtrks >= 10 ? "%s (Track %02d).bin" : "%s (Track %d).bin", base, t + 1);
+		else
+			name = base + ".bin";
+		p.track_file.push_back(name);
+		if (p.files.empty() || p.files.back() != name)
+		{
+			p.files.push_back(name);
+			p.sizes.push_back(0);
+		}
+	}
+
+	std::ostringstream str;
+	str.imbue(std::locale::classic());
+	if (p.gdi)
+		util::stream_format(str, "%d\n", toc.numtrks);
+	std::uint64_t outputoffs = 0;
+	std::uint32_t discoffs = 0;
+	int sessionnum = -1;
+	std::string current;
+	std::size_t fileidx = 0;
+	for (int t = 0; t < toc.numtrks; ++t)
+	{
+		cdrom_file::track_info const &info = toc.tracks[t];
+		if (p.track_file[t] != current)
+		{
+			if (!current.empty())
+				++fileidx;
+			outputoffs = 0;
+			if (!p.gdi)
+				discoffs = 0;
+			current = p.track_file[t];
+		}
+		if (mode == MODE_CUEBIN && toc.numsessions > 1 && sessionnum != int(info.session))
+		{
+			util::stream_format(str, "REM SESSION %02d\n", info.session + 1);
+			sessionnum = info.session;
+		}
+		output_track_metadata(mode, str, t, info, current, discoffs, outputoffs);
+		if (info.subtype != cdrom_file::CD_SUB_NONE)
+			p.subcode_dropped = true;
+		std::uint32_t const actualframes = info.frames - info.padframes + info.splitframes;
+		// os quadros de "split" vêm da trilha anterior, com o tamanho dela
+		std::uint64_t bytes = 0;
+		for (std::uint32_t f = 0; f < actualframes; ++f)
+		{
+			int const trk = (t > 0 && f < info.splitframes) ? t - 1 : t;
+			bytes += toc.tracks[trk].datasize;
+		}
+		outputoffs += bytes;
+		p.sizes[fileidx] += bytes;
+		p.total_bytes += bytes;
+		discoffs += actualframes + info.padframes;
+	}
+	(void)chd;
+	p.sheet = str.str();
+	return p;
+}
+
+std::string plan_json(CdPlan const &p)
+{
+	std::ostringstream o;
+	o << "{\"ok\":true,\"gdrom\":" << (p.gdi ? "true" : "false") << ",\"tracks\":" << p.tracks
+	  << ",\"subcodeDropped\":" << (p.subcode_dropped ? "true" : "false")
+	  << ",\"sheetExt\":\"" << (p.gdi ? "gdi" : "cue") << "\",\"totalBytes\":" << p.total_bytes << ",\"files\":[";
+	for (std::size_t i = 0; i < p.files.size(); ++i)
+		o << (i ? "," : "") << '"' << json_escape(p.files[i]) << '"';
+	o << "],\"sizes\":[";
+	for (std::size_t i = 0; i < p.sizes.size(); ++i)
+		o << (i ? "," : "") << p.sizes[i];
+	o << "],\"sheet\":\"" << json_escape(p.sheet) << "\"}";
+	return o.str();
+}
+
+// Leitor do "chdman copy" + cancelamento.
+class CancellableChdCompressor : public chd_chdfile_compressor
+{
+public:
+	CancellableChdCompressor(chd_file &file, std::atomic<bool> *cancel) : chd_chdfile_compressor(file), m_cancel(cancel) { }
+
+	uint32_t read_data(void *dest, uint64_t offset, uint32_t length) override
+	{
+		if (m_cancel && m_cancel->load(std::memory_order_relaxed))
+			throw std::error_condition(std::errc::operation_canceled);
+		return chd_chdfile_compressor::read_data(dest, offset, length);
+	}
+
+private:
+	std::atomic<bool> *m_cancel;
+};
+
+} // anonymous namespace
+
+Result extract_dvd(int chd_fd, int out_fd, Options const &opt)
+{
+	std::lock_guard<std::mutex> lock(g_engine_mutex);
+	ScopedStreamCapture cap(opt.log);
+	Result r;
+
+	chd_file input;
+	std::error_condition err = open_chd(chd_fd, input);
+	if (err)
+	{
+		r.code = ResultCode::INVALID_INPUT;
+		r.message = "Error opening CHD file: " + err.message();
+		return r;
+	}
+	std::string meta;
+	if (input.read_metadata(DVD_METADATA_TAG, 0, meta))
+	{
+		r.code = ResultCode::INVALID_INPUT;
+		r.message = has_cd_metadata(input) ? "CHD contains a CD image (use CD extraction)" : "CHD is not a DVD image";
+		return r;
+	}
+	util::sha1_t const expected = input.raw_sha1();
+	std::uint64_t const total = input.logical_bytes();
+	r.logical_bytes = total;
+	r.hunk_bytes = input.hunk_bytes();
+
+	auto outptr = open_output(out_fd, r);
+	if (!outptr)
+		return r;
+	FdFile &out = *outptr;
+
+	Throttle throttle(opt.progress_interval_ms);
+	int const workers = verify_workers(input, opt);
+	log(opt, util::string_format("Extração DVD: %u bytes, %d thread(s) de descompressão", total, workers));
+	emit(opt, throttle, Stage::EXTRACT, 0.0, 1.0, total, true);
+	VerifyOutcome const vo = parallel_verify(chd_fd, input, workers, opt, throttle, Stage::EXTRACT,
+			[&out](std::uint64_t off, std::uint8_t const *data, std::uint32_t n) -> std::error_condition {
+				std::size_t actual = 0;
+				return out.write_some_at(off, data, n, actual);
+			});
+	if (vo.cancelled)
+	{
+		r.code = ResultCode::CANCELLED;
+		r.message = "cancelled";
+		return r;
+	}
+	if (vo.err)
+	{
+		if (vo.sink_failed)
+			r.code = is_no_space(out.last_errno()) ? ResultCode::NO_SPACE : ResultCode::IO_ERROR;
+		else
+			r.code = vo.alloc_failed ? ResultCode::INTERNAL_ERROR : ResultCode::VERIFY_FAILED;
+		r.message = util::string_format("%s at offset %u: %s", vo.sink_failed ? "write error" : "read error",
+				vo.err_offset, vo.err.message());
+		return r;
+	}
+	if (vo.sha1 != expected)
+	{
+		r.code = ResultCode::VERIFY_FAILED;
+		r.message = "SHA1 mismatch: CHD " + expected.as_string() + " extracted " + vo.sha1.as_string();
+		return r;
+	}
+	if (std::error_condition const se = out.sync())
+	{
+		r.code = is_no_space(out.last_errno()) ? ResultCode::NO_SPACE : ResultCode::IO_ERROR;
+		r.message = "fsync: " + se.message();
+		return r;
+	}
+	emit(opt, throttle, Stage::EXTRACT, 1.0, 1.0, total, true, total);
+	r.code = ResultCode::OK;
+	r.output_bytes = total;
+	r.raw_sha1 = vo.sha1.as_string();
+	r.sha1 = input.sha1().as_string();
+	log(opt, "Extração concluída; SHA-1 dos dados confere com o CHD: " + r.raw_sha1);
+	return r;
+}
+
+std::string plan_cd_extract_json(int chd_fd, std::string const &base_name)
+{
+	chd_file chd;
+	std::error_condition const err = open_chd(chd_fd, chd);
+	if (err)
+		return "{\"ok\":false,\"error\":\"" + json_escape(err.message()) + "\"}";
+	if (!has_cd_metadata(chd))
+		return "{\"ok\":false,\"error\":\"not a CD/GD-ROM CHD\"}";
+	try
+	{
+		cdrom_file cdrom(&chd);
+		return plan_json(make_cd_plan(chd, cdrom, base_name));
+	}
+	catch (std::exception const &e)
+	{
+		return "{\"ok\":false,\"error\":\"" + json_escape(e.what()) + "\"}";
+	}
+}
+
+Result extract_cd(int chd_fd, std::string const &base_name, std::vector<int> const &out_fds, Options const &opt)
+{
+	std::lock_guard<std::mutex> lock(g_engine_mutex);
+	ScopedStreamCapture cap(opt.log);
+	Result r;
+
+	chd_file input;
+	std::error_condition err = open_chd(chd_fd, input);
+	if (err || !has_cd_metadata(input))
+	{
+		r.code = ResultCode::INVALID_INPUT;
+		r.message = err ? "Error opening CHD file: " + err.message() : std::string("not a CD/GD-ROM CHD");
+		return r;
+	}
+	try
+	{
+		cdrom_file cdrom(&input);
+		cdrom_file::toc const &toc = cdrom.get_toc();
+		CdPlan const plan = make_cd_plan(input, cdrom, base_name);
+		if (out_fds.size() != plan.files.size())
+		{
+			r.code = ResultCode::INTERNAL_ERROR;
+			r.message = "output count mismatch";
+			return r;
+		}
+		std::vector<std::unique_ptr<FdFile>> outs;
+		for (int fd : out_fds)
+		{
+			auto o = open_output(fd, r);
+			if (!o)
+				return r;
+			outs.push_back(std::move(o));
+		}
+		r.tracks = plan.tracks;
+		r.logical_bytes = plan.total_bytes;
+		log(opt, util::string_format("Extração %s: %d trilha(s), %d arquivo(s), %u bytes", plan.gdi ? "GD-ROM (.gdi)" : "CD (.cue)",
+				plan.tracks, int(plan.files.size()), plan.total_bytes));
+		if (plan.subcode_dropped)
+			log(opt, "Aviso: o CHD tem subcódigo; .cue/.gdi não comportam subcódigo e ele foi omitido (como no chdman)");
+
+		int const mode = plan.gdi ? MODE_GDI : MODE_CUEBIN;
+		Throttle throttle(opt.progress_interval_ms);
+		std::vector<std::uint8_t> buffer;
+		std::uint64_t done = 0;
+		std::size_t fileidx = 0;
+		std::string current;
+		std::uint64_t outputoffs = 0;
+		emit(opt, throttle, Stage::EXTRACT, 0.0, 1.0, plan.total_bytes, true);
+		for (int t = 0; t < toc.numtrks; ++t)
+		{
+			cdrom_file::track_info const &info = toc.tracks[t];
+			if (plan.track_file[t] != current)
+			{
+				if (!current.empty())
+					++fileidx;
+				current = plan.track_file[t];
+				outputoffs = 0;
+			}
+			FdFile &out = *outs[fileidx];
+			buffer.resize((2 * 1024 * 1024 / cdrom_file::MAX_SECTOR_DATA) * cdrom_file::MAX_SECTOR_DATA);
+			std::uint32_t bufferoffs = 0;
+			std::uint32_t const actualframes = info.frames - info.padframes + info.splitframes;
+			for (std::uint32_t frame = 0; frame < actualframes; ++frame)
+			{
+				if ((frame & 255) == 0)
+				{
+					if (is_cancelled(opt))
+					{
+						r.code = ResultCode::CANCELLED;
+						r.message = "cancelled";
+						return r;
+					}
+					emit(opt, throttle, Stage::EXTRACT, double(done + bufferoffs) / double(std::max<std::uint64_t>(1, plan.total_bytes)),
+							1.0, plan.total_bytes, false, done + bufferoffs);
+				}
+				int trk;
+				std::uint32_t frameofs;
+				if (t > 0 && frame < info.splitframes)
+				{
+					trk = t - 1;
+					frameofs = toc.tracks[trk].frames - info.splitframes + frame;
+				}
+				else
+				{
+					trk = t;
+					frameofs = frame - info.splitframes;
+				}
+				if (!cdrom.read_data(cdrom.get_track_start_phys(trk) + frameofs, &buffer[bufferoffs], toc.tracks[trk].trktype, true))
+				{
+					r.code = ResultCode::VERIFY_FAILED;
+					r.message = util::string_format("Error reading frame %u from track %d", frame, trk + 1);
+					return r;
+				}
+				// .cue e .gdi (CHD v5) guardam áudio em little-endian
+				if (((mode == MODE_GDI && input.version() > 4) || mode == MODE_CUEBIN) && toc.tracks[trk].trktype == cdrom_file::CD_TRACK_AUDIO)
+					for (std::uint32_t i = 0; i < toc.tracks[trk].datasize; i += 2)
+						std::swap(buffer[bufferoffs + i], buffer[bufferoffs + i + 1]);
+				bufferoffs += toc.tracks[trk].datasize;
+				if (bufferoffs + cdrom_file::MAX_SECTOR_DATA > buffer.size() || frame == actualframes - 1)
+				{
+					std::size_t actual = 0;
+					std::error_condition const we = out.write_some_at(outputoffs, buffer.data(), bufferoffs, actual);
+					if (we)
+					{
+						r.code = is_no_space(out.last_errno()) ? ResultCode::NO_SPACE : ResultCode::IO_ERROR;
+						r.message = "write error: " + we.message();
+						return r;
+					}
+					outputoffs += bufferoffs;
+					done += bufferoffs;
+					bufferoffs = 0;
+				}
+			}
+		}
+		for (std::size_t i = 0; i < outs.size(); ++i)
+		{
+			std::uint64_t len = 0;
+			outs[i]->length(len);
+			if (len != plan.sizes[i])
+			{
+				r.code = ResultCode::IO_ERROR;
+				r.message = util::string_format("%s: size %u, expected %u", plan.files[i], len, plan.sizes[i]);
+				return r;
+			}
+			if (std::error_condition const se = outs[i]->sync())
+			{
+				r.code = is_no_space(outs[i]->last_errno()) ? ResultCode::NO_SPACE : ResultCode::IO_ERROR;
+				r.message = "fsync: " + se.message();
+				return r;
+			}
+		}
+		emit(opt, throttle, Stage::EXTRACT, 1.0, 1.0, plan.total_bytes, true, plan.total_bytes);
+		r.code = ResultCode::OK;
+		r.output_bytes = plan.total_bytes;
+		r.sha1 = input.sha1().as_string();
+		log(opt, "Extração de CD concluída");
+	}
+	catch (std::bad_alloc const &)
+	{
+		r.code = ResultCode::INTERNAL_ERROR;
+		r.message = "out of memory";
+	}
+	catch (std::exception const &e)
+	{
+		r.code = ResultCode::INTERNAL_ERROR;
+		r.message = e.what();
+	}
+	return r;
+}
+
+Result recompress(int in_fd, int out_fd, Options const &opt)
+{
+	std::lock_guard<std::mutex> lock(g_engine_mutex);
+	ScopedStreamCapture cap(opt.log);
+	Result r;
+	configure_threads(opt);
+
+	chd_file input;
+	std::error_condition err = open_chd(in_fd, input);
+	if (err)
+	{
+		r.code = ResultCode::INVALID_INPUT;
+		r.message = "Error opening CHD file: " + err.message();
+		return r;
+	}
+	bool const cd = has_cd_metadata(input);
+	std::string perr;
+	chd_codec_type compression[4];
+	if (!check_hunk(opt.hunk_bytes, input.unit_bytes(), perr) || !parse_codecs(opt.codecs, cd, compression, perr))
+	{
+		r.code = ResultCode::INVALID_INPUT;
+		r.message = perr;
+		return r;
+	}
+	std::uint32_t const hunk_size = opt.hunk_bytes ? opt.hunk_bytes : input.hunk_bytes();
+	if ((hunk_size % input.hunk_bytes()) && (input.hunk_bytes() % hunk_size))
+	{
+		r.code = ResultCode::INVALID_INPUT;
+		r.message = util::string_format("hunk size %u is not a multiple or factor of the input hunk size %u", hunk_size, input.hunk_bytes());
+		return r;
+	}
+	if (opt.codecs.empty())
+	{
+		auto const &defaults = get_compression_defaults(input); // função do chdman.cpp
+		for (int i = 0; i < 4; ++i)
+			compression[i] = defaults[i];
+	}
+	r.compression = codecs_string(compression);
+	std::uint64_t const logical = input.logical_bytes();
+	log(opt, util::string_format("Recompactação (chdman copy): %s, %u bytes, hunk %u -> %u, codecs %s, threads %d",
+			cd ? "CD" : "DVD/dados", logical, input.hunk_bytes(), hunk_size, r.compression, effective_threads(opt)));
+
+	auto outptr = open_output(out_fd, r);
+	if (!outptr)
+		return r;
+	FdFile &out = *outptr;
+	try
+	{
+		std::unique_ptr<cdrom_file> cdrom; // destruído depois do compressor
+		auto chd = std::make_unique<CancellableChdCompressor>(input, opt.cancel);
+		err = chd->create(std::move(outptr), logical, hunk_size, input.unit_bytes(), compression);
+		if (err)
+		{
+			r.code = is_no_space(out.last_errno()) ? ResultCode::NO_SPACE : ResultCode::CHD_ERROR;
+			r.message = "Error creating CHD file: " + err.message();
+			return r;
+		}
+		// --- metadados, como no do_copy() ---
+		std::vector<std::uint8_t> metadata;
+		chd_metadata_tag metatag;
+		std::uint8_t metaflags;
+		std::uint32_t index = 0;
+		bool redo_cd = false, cdda_swap = false;
+		for (err = input.read_metadata(CHDMETATAG_WILDCARD, index++, metadata, metatag, metaflags); !err;
+				err = input.read_metadata(CHDMETATAG_WILDCARD, index++, metadata, metatag, metaflags))
+		{
+			if (metatag == CDROM_OLD_METADATA_TAG || metatag == CDROM_TRACK_METADATA_TAG)
+			{
+				redo_cd = true;
+				continue;
+			}
+			if (metatag == GDROM_OLD_METADATA_TAG)
+			{
+				cdda_swap = redo_cd = true;
+				continue;
+			}
+			err = chd->write_metadata(metatag, CHDMETAINDEX_APPEND, metadata, metaflags);
+			if (err)
+			{
+				r.code = ResultCode::CHD_ERROR;
+				r.message = "Error writing cloned metadata: " + err.message();
+				return r;
+			}
+		}
+		if (redo_cd)
+		{
+			cdrom = std::make_unique<cdrom_file>(&input);
+			cdrom_file::toc const &toc = cdrom->get_toc();
+			err = cdrom_file::write_metadata(chd.get(), toc);
+			if (err)
+			{
+				r.code = ResultCode::CHD_ERROR;
+				r.message = "Error writing upgraded CD metadata: " + err.message();
+				return r;
+			}
+			if (cdda_swap)
+				chd->m_toc = &toc;
+		}
+		std::string const comp = r.compression;
+		r = run_compression(*chd, out, opt, logical, cap);
+		r.compression = comp;
+	}
+	catch (std::bad_alloc const &)
+	{
+		r.code = ResultCode::INTERNAL_ERROR;
+		r.message = "out of memory";
+	}
+	catch (std::exception const &e)
+	{
+		r.code = ResultCode::INTERNAL_ERROR;
+		r.message = e.what();
+	}
 	return r;
 }
 

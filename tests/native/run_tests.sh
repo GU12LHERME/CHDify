@@ -114,6 +114,53 @@ PY
 	r=$("$ENG" verify "$OUT/corr.chd" --threads 4 --quiet); [[ $(echo "$r" | code) == 6 ]] && ok "corrupção a ${pos} do arquivo detectada (4 threads)" || bad "corr $pos: $r"
 done
 
+cp "$OUT/ps2_dvd.chd" "$OUT/corrupt.chd"
+python3 - "$OUT/corrupt.chd" <<'PY'
+import sys
+f = open(sys.argv[1], "r+b"); f.seek(5 * 1024 * 1024); d = bytes(b ^ 0x5A for b in f.read(64)); f.seek(5 * 1024 * 1024); f.write(d)
+PY
+echo "== GD-ROM (Dreamcast, .gdi)"
+r=$("$ENG" cd "$FX/gd.gdi" "$OUT/gd.chd" --quiet)
+"$REF" createcd -i "$FX/gd.gdi" -o "$OUT/gd.ref.chd" -f >/dev/null 2>&1
+[[ $(echo "$r" | code) == 0 ]] && cmp -s "$OUT/gd.chd" "$OUT/gd.ref.chd" && ok "GDI -> CHD idêntico ao chdman" || bad "gdi: $r"
+r=$("$ENG" cd "$FX/gd.gdi" "$OUT/gd.fd.chd" --via-fd --quiet)
+cmp -s "$OUT/gd.fd.chd" "$OUT/gd.ref.chd" && ok "GDI por descritores (modo Android) idêntico" || bad "gdi via-fd: $r"
+
+echo "== Extração (CHD -> ISO, BIN/CUE, GDI)"
+mkdir -p "$OUT/ex" "$OUT/exref"
+r=$("$ENG" extractdvd "$OUT/ps2_dvd.chd" "$OUT/ex/back.iso" --quiet)
+[[ $(echo "$r" | code) == 0 ]] && cmp -s "$OUT/ex/back.iso" "$FX/ps2_dvd.iso" && ok "CHD de DVD -> ISO idêntica à original" || bad "extractdvd: $r"
+r=$("$ENG" extractdvd "$OUT/mixed_cd.chd" "$OUT/ex/x.iso" --quiet); [[ $(echo "$r" | code) == 2 ]] && ok "CHD de CD recusado na extração de DVD" || bad "dvd de cd: $r"
+r=$("$ENG" extractcd "$OUT/mixed_cd.chd" "$OUT/ex" "Jogo" --quiet)
+( cd "$OUT/exref" && "$REF" extractcd -i ../mixed_cd.chd -o Jogo.cue -ob "Jogo (Track %t).bin" -sb -f >/dev/null 2>&1 )
+[[ $(echo "$r" | code) == 0 ]] && cmp -s "$OUT/ex/Jogo.cue" "$OUT/exref/Jogo.cue" && ok "CHD de CD -> .cue idêntico ao chdman" || bad "extractcd cue: $r"
+all=1; for i in 1 2 3; do cmp -s "$OUT/ex/Jogo (Track $i).bin" "$FX/mixed (Track 0$i).bin" || all=0; done
+[[ $all == 1 ]] && ok "trilhas de dados e áudio extraídas idênticas às originais" || bad "extractcd trilhas"
+r=$("$ENG" extractcd "$OUT/data_cd_cd.chd" "$OUT/ex" "Dados" --quiet)
+[[ $(echo "$r" | code) == 0 && -f "$OUT/ex/Dados.bin" && -f "$OUT/ex/Dados.cue" ]] && ok "CD de uma trilha -> Dados.bin + Dados.cue" || bad "single: $r"
+r=$("$ENG" extractcd "$OUT/gd.chd" "$OUT/ex" "Disco" --quiet)
+( cd "$OUT/exref" && "$REF" extractcd -i ../gd.chd -o Disco.gdi -f >/dev/null 2>&1 )
+[[ $(echo "$r" | code) == 0 ]] && cmp -s "$OUT/ex/Disco.gdi" "$OUT/exref/Disco.gdi" && ok "GD-ROM -> .gdi idêntico ao chdman" || bad "extract gdi: $r"
+all=1; for f in 01.bin 02.raw 03.bin; do cmp -s "$OUT/ex/Disco$f" "$FX/gd_track$f" || all=0; done
+[[ $all == 1 ]] && ok "trilhas do GD-ROM idênticas às originais" || bad "gdi trilhas"
+r=$("$ENG" extractdvd "$OUT/ps2_dvd.chd" "$OUT/ex/c.iso" --cancel-at 0.3 --quiet); [[ $(echo "$r" | code) == 1 && ! -e "$OUT/ex/c.iso" ]] && ok "extração cancelada sem arquivo parcial" || bad "cancel extract: $r"
+r=$(bash -c 'trap "" XFSZ; ulimit -f 4096; exec "$0" extractdvd "$1" "$2" --quiet' "$ENG" "$OUT/ps2_dvd.chd" "$OUT/ex/ns.iso"); [[ $(echo "$r" | code) == 3 ]] && ok "extração sem espaço (código 3)" || bad "extract nospace: $r"
+r=$("$ENG" extractdvd "$OUT/corrupt.chd" "$OUT/ex/k.iso" --quiet 2>/dev/null); [[ $(echo "$r" | code) == 6 ]] && ok "CHD corrompido: extração recusada" || bad "extract corrupt: $r"
+
+echo "== Recompactação (chdman copy)"
+r=$("$ENG" recompress "$OUT/ps2_dvd.chd" "$OUT/rc.chd" --codecs lzma,zlib,huff,flac --hunk 32768 --quiet)
+"$REF" copy -i "$OUT/ps2_dvd.chd" -o "$OUT/rc.ref.chd" -c lzma,zlib,huff,flac -hs 32768 -f >/dev/null 2>&1
+[[ $(echo "$r" | code) == 0 ]] && cmp -s "$OUT/rc.chd" "$OUT/rc.ref.chd" && ok "DVD recompactado idêntico ao chdman copy" || bad "recompress dvd: $r"
+[[ $(echo "$r" | field rawSha1) == $(sha1sum "$FX/ps2_dvd.iso" | cut -c1-40) ]] && ok "recompactação preserva o SHA-1 dos dados" || bad "recompress sha"
+r=$("$ENG" recompress "$OUT/mixed_cd.chd" "$OUT/rcd.chd" --hunk 39168 --quiet)
+"$REF" copy -i "$OUT/mixed_cd.chd" -o "$OUT/rcd.ref.chd" -hs 39168 -f >/dev/null 2>&1
+[[ $(echo "$r" | code) == 0 ]] && cmp -s "$OUT/rcd.chd" "$OUT/rcd.ref.chd" && ok "CD recompactado idêntico ao chdman copy" || bad "recompress cd: $r"
+r=$("$ENG" recompress "$OUT/gd.chd" "$OUT/rgd.chd" --quiet)
+"$REF" copy -i "$OUT/gd.chd" -o "$OUT/rgd.ref.chd" -f >/dev/null 2>&1
+[[ $(echo "$r" | code) == 0 ]] && cmp -s "$OUT/rgd.chd" "$OUT/rgd.ref.chd" && ok "GD-ROM recompactado idêntico ao chdman copy" || bad "recompress gd: $r"
+r=$("$ENG" recompress "$OUT/ps2_dvd.chd" "$OUT/x.chd" --hunk 6144 --quiet); [[ $(echo "$r" | code) == 2 ]] && ok "hunk incompatível recusado na recompactação" || bad "rc hunk: $r"
+r=$("$ENG" recompress "$OUT/ps2_dvd.chd" "$OUT/x.chd" --cancel-at 0.3 --quiet); [[ $(echo "$r" | code) == 1 ]] && ok "recompactação cancelada" || bad "rc cancel: $r"
+
 echo "== Cancelamento"
 r=$("$ENG" dvd "$FX/ps2_dvd.iso" "$OUT/cancel.chd" --cancel-at 0.3 --quiet)
 [[ $(echo "$r" | code) == 1 && ! -e "$OUT/cancel.chd" ]] && ok "DVD cancelado a 30% (código 1, sem arquivo parcial)" || bad "cancel dvd: $r"
