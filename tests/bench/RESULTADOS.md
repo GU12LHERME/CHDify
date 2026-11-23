@@ -88,3 +88,22 @@ cmake -S app/src/main/cpp -B build-host -G Ninja && cmake --build build-host
 python3 tests/bench/make_bench_images.py /tmp/bench build-host/mkraw
 tests/bench/run_bench.sh build-host /tmp/bench
 ```
+
+## Modos de CPU (CHDify 1.0.0)
+
+Máquina de build (x86-64, 2 núcleos), imagem DVD de 178 MB (`make_bench_images.py --escala 0.5`),
+`chdengine_cli` com `--threads 1` (equivale ao Econômico num aparelho de 2 núcleos) e `--threads 2`.
+Tempos reais medidos em 23/11/2026:
+
+| Operação | 1 thread | 2 threads | ganho |
+|---|---|---|---|
+| Converter ISO → CHD (padrão chdman) | 37,63 s | 19,67 s | 1,91× |
+| Verificar CHD | 2,45 s | 1,70 s | 1,44× |
+| Extrair CHD → ISO | 2,85 s | 1,80 s | 1,58× |
+| Recompactar (zlib, hunk 16 KiB) | 6,97 s | 5,64 s | 1,24× |
+
+A ISO extraída é byte a byte idêntica à original nas duas execuções.
+Conclusão: a compressão escala quase linearmente com os núcleos; o modo Econômico
+(metade dos núcleos, prioridade baixa) troca velocidade por menos calor de forma previsível.
+Os perfis de compactação não foram alterados: nenhuma medição mostrou ganho que justificasse mudar.
+Medições num aparelho ARM real (big.LITTLE, limitação térmica) ficam pendentes de hardware.

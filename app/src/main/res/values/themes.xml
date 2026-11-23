@@ -15,4 +15,10 @@
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
     </style>
+
+    <!-- Tela de abertura (Android 10 e 11): fundo preto com o símbolo centralizado.
+         A MainActivity troca para Theme.CHDify antes de desenhar a interface. -->
+    <style name="Theme.CHDify.Starting">
+        <item name="android:windowBackground">@drawable/splash_window</item>
+    </style>
 </resources>

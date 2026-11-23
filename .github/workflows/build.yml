@@ -155,22 +155,44 @@ jobs:
       - name: Renomear APKs
         run: |
           mkdir -p dist
-          cp app/build/outputs/apk/release/*.apk dist/ConversorCHD-${{ github.run_number }}-arm64-v8a-release.apk
-          cp app/build/outputs/apk/debug/*.apk dist/ConversorCHD-${{ github.run_number }}-arm64-v8a-debug.apk
+          cp app/build/outputs/apk/release/*.apk dist/CHDify-1.0.0-${{ github.run_number }}-arm64-v8a.apk
+          cp app/build/outputs/apk/debug/*.apk dist/CHDify-1.0.0-${{ github.run_number }}-arm64-v8a-debug.apk
+      - name: Conferir assinatura
+        env:
+          KEYSTORE_B64: ${{ secrets.CONVERSOR_KEYSTORE_BASE64 }}
+        run: |
+          APK=$(ls dist/*-arm64-v8a.apk)
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "$APK" | tee assinatura.txt
+          if [ -n "$KEYSTORE_B64" ]; then echo "SIGNING=release" >> "$GITHUB_ENV"; else echo "SIGNING=debug" >> "$GITHUB_ENV"; fi
       - uses: actions/upload-artifact@v4
         with:
-          name: ConversorCHD-apk
+          name: CHDify-apk
           path: dist/*.apk
       - name: Publicar na Release "ultima-versao"
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp dist/*-release.apk dist/ConversorCHD-arm64-v8a.apk
+          cp dist/CHDify-1.0.0-${{ github.run_number }}-arm64-v8a.apk dist/CHDify-arm64-v8a.apk
+          {
+            cat RELEASE_NOTES.md
+            echo
+            echo "---"
+            echo "Build ${{ github.run_number }} · commit ${{ github.sha }}"
+            if [ "$SIGNING" = release ]; then
+              echo "Assinado com a chave de release do CHDify (atualizações futuras instalam por cima)."
+            else
+              echo "ATENÇÃO: assinado com chave temporária de depuração (os secrets de assinatura não estão configurados). Atualizações futuras exigirão desinstalar."
+            fi
+            echo
+            echo '```'
+            grep -E "SHA-256" assinatura.txt || true
+            echo '```'
+          } > notes.md
           gh release delete ultima-versao --yes --cleanup-tag || true
-          gh release create ultima-versao dist/ConversorCHD-arm64-v8a.apk dist/*-debug.apk \
-            --title "Conversor CHD (build ${{ github.run_number }})" \
-            --notes "APK gerado automaticamente a partir de ${{ github.sha }}. Instale ConversorCHD-arm64-v8a.apk." \
+          gh release create ultima-versao dist/CHDify-arm64-v8a.apk dist/*-debug.apk \
+            --title "CHDify 1.0.0 (build ${{ github.run_number }})" \
+            --notes-file notes.md \
             --target "${{ github.sha }}" --latest
       - uses: actions/upload-artifact@v4
         if: always()
@@ -179,6 +201,7 @@ jobs:
           path: |
             gradle-build.log
             apk-contents.txt
+            assinatura.txt
             app/build/reports/**
             app/.cxx/**/*.log
             app/.cxx/**/build.ninja
@@ -230,7 +253,7 @@ jobs:
           script: |
             chmod +x gradlew
             bash -o pipefail -c "./gradlew --no-daemon --stacktrace connectedDebugAndroidTest -PemulatorAbi=true 2>&1 | tee emulator-tests.log"
-            adb logcat -d -s ConversorCHD:* MAME:* AndroidRuntime:E TestRunner:* > logcat.txt || true
+            adb logcat -d -s CHDify:* MAME:* AndroidRuntime:E TestRunner:* > logcat.txt || true
       - uses: actions/upload-artifact@v4
         if: always()
         with:

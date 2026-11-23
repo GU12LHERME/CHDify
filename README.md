@@ -1,7 +1,9 @@
-# Conversor CHD (Android)
+# CHDify
 
-Aplicativo Android nativo que converte imagens de disco (**ISO**, **CUE/BIN**, **GDI**) para **CHD**
-direto no aparelho, usando o código oficial do **chdman / biblioteca CHD do MAME** compilado para ARM64.
+<img src="tools/icon/chdify_512.png" width="96" align="right" alt="Ícone do CHDify">
+
+Aplicativo Android nativo que converte imagens de disco para **CHD** e de volta, direto no aparelho,
+usando o código oficial do **chdman / biblioteca CHD do MAME** compilado para ARM64.
 Funciona offline, sem root, sem Termux e sem aplicativos adicionais.
 
 ## Resumo
@@ -9,33 +11,55 @@ Funciona offline, sem root, sem Termux e sem aplicativos adicionais.
 | Item | Situação |
 |---|---|
 | Núcleo | `chd.cpp`, `chdcodec.cpp`, `cdrom.cpp` e `chdman.cpp` do MAME, sem modificações (commit em `app/src/main/cpp/mame/MAME_COMMIT`) |
-| Saída | Os CHDs gerados pelo motor são **idênticos byte a byte** aos do `chdman createdvd` / `createcd` oficial (verificado nos testes) |
-| Modos | DVD (`createdvd`) e CD (`createcd`), com três perfis de compactação (Rápido, Equilibrado = padrão do chdman, Máximo) |
-| Entradas | `.iso`, `.img`, `.bin` avulso, `.cue` (+ `.bin`/`.wav`), `.gdi` (GD-ROM) |
+| Conversão | ISO, BIN/CUE e GDI → CHD; CHD de DVD → ISO; CHD de CD → BIN/CUE; CHD de GD-ROM (Dreamcast) → GDI |
+| Fidelidade | CHDs **idênticos byte a byte** aos do `chdman createdvd`/`createcd`; extrações idênticas às do `chdman extractdvd`/`extractcd` (verificado nos testes) |
+| Perfis | Rápido, Equilibrado (= padrão do chdman) e Máximo |
 | Arquivos > 4 GB | Sim (E/S de 64 bits, testado com 4,3 GB) |
 | Plataforma | Android 10+ (API 29), alvo API 36 (Android 16), arm64-v8a, páginas de 16 KB |
+| Pacote | `com.conversorchd` (mantido para permitir atualizações) |
 
 ## Funcionalidades
 
-- Seleção de arquivos pelo gerenciador do Android (seleção múltipla) ou de uma pasta inteira.
-- Fila com conversão em sequência; cada item pode ter o modo CD/DVD ajustado quando os dois são válidos.
-- Detecção do tipo de imagem antes da conversão: layout de setores (2048/2336/2352), ISO9660, UDF,
-  imagem truncada e plataforma (PS2, PS1, PSP, GameCube, Wii, Xbox, Saturn, Sega CD, Dreamcast).
-- Escolha do modo adequado (veja abaixo) e bloqueio de entradas inválidas, com a explicação.
-- Serviço em primeiro plano (`dataSync`) com notificação de progresso, wake lock parcial e botão Cancelar.
-- Progresso real (porcentagem do núcleo), velocidade, tempo decorrido, tempo restante,
-  tamanho original e tamanho final (estimativa durante a conversão, valor real ao final).
-- Cancelamento seguro: o núcleo para no próximo bloco, o arquivo parcial é apagado e a fila pode continuar depois.
-- Verificação de integridade opcional (padrão: ligada), equivalente a `chdman verify`: todos os hunks são
-  descomprimidos (em paralelo) e os SHA-1 (dados e global) conferidos. O SHA-1 dos dados também é comparado com o da conversão.
-- Três perfis de compactação e opções avançadas (tamanho de hunk por tipo de mídia, número de threads). Veja abaixo.
-- O CHD é gravado como `Nome.chd.parcial` e só recebe o nome final depois de convertido e verificado. Se o app
-  for encerrado no meio, o arquivo incompleto é apagado na próxima abertura.
-- O arquivo original é aberto somente para leitura; nada no destino é sobrescrito (`Jogo (2).chd`, ...).
-- Log detalhado por item (mensagens do chdman, trilhas, codecs, SHA-1), com botão para copiar.
-- Interface em português, preto e branco para telas OLED (fundo #000000, texto branco, cinza #8C8C8C para
-  informações secundárias, linhas #1A1A1A e moldura branca no item focado), com navegação por toque, D-pad e gamepad.
-- Ícone: CD branco com "CHD" (vetorial, com versão monocromática para os ícones temáticos do Android 13+).
+**Conversão.** Seleção de arquivos (múltipla) ou de uma pasta inteira; o tipo é detectado automaticamente
+(layout de setores 2048/2336/2352, ISO9660, UDF, imagem truncada, plataforma: PS2, PS1, PSP, GameCube, Wii,
+Xbox, Saturn, Sega CD, Dreamcast). Entradas inválidas são bloqueadas com a explicação.
+
+**Fila inteligente.** Vários itens, reordenar, remover, duplicados ignorados, progresso individual e geral,
+erro isolado não interrompe a fila, cancelar item ou fila inteira, resumo final. A fila é salva em disco
+(gravação atômica): se o app for encerrado, os itens pendentes voltam, e o que estava em andamento aparece
+como **Interrompido**, para ser refeito do início. Não existe retomada parcial de CHD: o formato grava o mapa
+de hunks no fim, e um arquivo incompleto não é recuperável com segurança.
+
+**Ferramentas CHD.** Inspecionar (versão, tipo, trilhas, codecs, hunk, tamanhos, taxa, SHA-1, metadados),
+verificar integridade, recompactar com outro perfil (equivale a `chdman copy`, com comparação de tamanho),
+extrair e exportar as informações técnicas em texto.
+
+**Excluir original após converter** (desligado por padrão). Só apaga quando o item terminou, a verificação de
+integridade passou (ela fica obrigatória) e o arquivo gerado existe com o tamanho esperado. Nunca apaga após
+falha, cancelamento ou interrupção; nunca apaga arquivo usado por outro item da fila, por outra folha
+`.cue`/`.gdi` ou por playlist `.m3u` da mesma pasta. Para BIN/CUE e GDI exige que o jogo tenha sido adicionado
+pela opção Pasta (sem acesso à pasta não há como provar que as trilhas não são compartilhadas). Por padrão,
+cada exclusão pede confirmação. Em extração e recompactação, apagar o CHD de origem exige uma segunda autorização.
+
+**Armazenamento.** Checagem de espaço livre com estimativa conservadora antes de começar; saída gravada como
+`Nome.parcial` e renomeada só no fim; nada é sobrescrito (renomeia `Jogo (2).chd` ou pula, conforme o ajuste);
+restos temporários limpos na abertura; cartão SD e USB pelo seletor do Android; perda de acesso (mídia removida,
+permissão revogada) vira erro claro, com o parcial apagado.
+
+**Organização.** Nomes preservados; opção de subpastas por console; jogos multidisco reconhecidos e playlist
+`.m3u` gerada apontando para os CHDs (sem quebrar referências existentes). Extração de CD/GD-ROM vai para uma
+subpasta própria, para não misturar trilhas de jogos diferentes.
+
+**Histórico local.** Nome, operação, data e hora, duração, tamanhos, economia, perfil e resultado. Pode ser apagado.
+Nenhum dado sai do aparelho.
+
+**Execução.** Serviço em primeiro plano (`dataSync`) com notificação (progresso, cancelar item, cancelar fila),
+wake lock parcial, progresso real do núcleo, velocidade, tempo decorrido e restante. Verificação de integridade
+(equivalente a `chdman verify`, em paralelo) ligada por padrão. Modos de CPU Econômico, Equilibrado e Desempenho.
+
+**Interface.** Seções Conversão, Fila, Ferramentas, Histórico e Ajustes; preto puro (OLED) e branco;
+avançado recolhido; tela de abertura preta com o símbolo do app (SplashScreen API no Android 12+);
+toque, D-pad e gamepad; voltar preditivo do Android 16.
 
 ### Controles físicos
 
@@ -43,12 +67,12 @@ Funciona offline, sem root, sem Termux e sem aplicativos adicionais.
 |---|---|
 | D-pad / analógico | navega entre os controles (anel de foco branco) |
 | A | confirma |
-| B | voltar |
-| Start | iniciar conversão |
+| B | volta para Conversão / sai |
+| Start | inicia a fila |
 | X | adicionar arquivos |
-| Y | cancelar (com confirmação) |
+| Y | cancelar a fila (com confirmação) |
 | Select | log do item atual |
-| L1 / R1 | troca o perfil de compactação |
+| L1 / R1 | seção anterior / próxima |
 
 ## Perfis de compactação
 
@@ -97,7 +121,7 @@ app/src/main/
 │   ├── mame/                  só os arquivos do MAME usados pelo build (lista em tools/mame_files.txt), BSD-3-Clause
 │   ├── engine/
 │   │   ├── chd_engine.cpp     inclui chdman.cpp inalterado; laço de compressão com progresso,
-│   │   │                      cancelamento e E/S por descritor; verify; info
+│   │   │                      cancelamento e E/S por descritor; verify; extração; recompactação; info
 │   │   ├── fd_file.cpp        util::random_read_write sobre pread/pwrite de 64 bits
 │   │   └── disc_probe.cpp     análise ISO9660/UDF/plataforma
 │   ├── jni/chdconv_jni.cpp    ponte JNI (libchdconv.so)
@@ -105,7 +129,7 @@ app/src/main/
 │   └── CMakeLists.txt
 └── java/com/conversorchd/
     ├── nativebridge/          NativeChd (externals) e NativeListener
-    ├── core/                  análise, folhas .cue/.gdi, diretório de trabalho, execução, fila
+    ├── core/                  análise, folhas .cue/.gdi, fila persistente, execução, exclusão segura, histórico, M3U
     ├── service/               ConversionService (primeiro plano, wake lock, notificação)
     └── ui/                    MainActivity e componentes (sem AndroidX)
 ```
@@ -131,7 +155,7 @@ app/src/main/
 
 ### Motor nativo (`tests/native/run_tests.sh`)
 
-Gera imagens de teste sintéticas (sem conteúdo protegido) e executa 68 verificações, todas aprovadas em
+Gera imagens de teste sintéticas (sem conteúdo protegido) e executa 86 verificações, todas aprovadas em
 x86_64 (GCC e Clang/libc++) e em ARM64 (compilação cruzada executada no QEMU):
 
 - DVD: CHD idêntico byte a byte ao `chdman createdvd`, SHA-1 dos dados igual ao SHA-1 da ISO,
@@ -145,6 +169,8 @@ x86_64 (GCC e Clang/libc++) e em ARM64 (compilação cruzada executada no QEMU):
 - Imagem de 4,3 GB com dados aleatórios depois da fronteira de 4 GiB: SHA-1 confere e a verificação passa.
 - Perfis (zlib 16K, hunks de 32K e 64K, CD 8/16 quadros): verificados e extraídos pelo chdman oficial, com dados idênticos.
 - Verificação paralela: mesmo SHA-1 com 1 e 4 threads, cancelamento, corrupção detectada em vários pontos do arquivo.
+- Extração pelo motor: ISO, `.cue`/`.bin` e `.gdi` idênticos aos do chdman oficial (inclusive GD-ROM) e trilhas
+  idênticas às originais; recompactação equivalente a `chdman copy`.
 
 Para executar localmente:
 
@@ -159,7 +185,8 @@ tests/native/run_tests.sh build-host --big
 - Testes de unidade (JVM): leitura e reescrita de `.cue`/`.gdi`, Latin-1, formatação.
 - Testes instrumentados (`ConversionInstrumentedTest`), executados no emulador pelo CI (API 34 e 35):
   conversão DVD com SHA-1, `.cue` com áudio pelo mesmo caminho do serviço (WorkDir), cancelamento,
-  entrada inválida, CHD corrompido e arquivo maior que 4 GB.
+  entrada inválida, CHD corrompido, arquivo maior que 4 GB, extração DVD e CD (trilhas idênticas às
+  originais), recompactação, persistência da fila em JSON e regras de exclusão segura.
 
 ## Compilação
 
@@ -171,14 +198,23 @@ Requisitos: JDK 17, Android SDK 36, NDK 27.2.12479018, CMake 3.22.1.
 ```
 
 O workflow `.github/workflows/build.yml` roda tudo isso automaticamente e publica os APKs como artefato
-`ConversorCHD-apk`, além dos logs de compilação e de testes.
+`CHDify-apk` e na Release `ultima-versao` (`CHDify-arm64-v8a.apk`), além dos logs de compilação e de testes.
 
 ### Assinatura
 
-Sem configuração, o APK de release é assinado com a chave de debug do runner (instalável, mas a chave
-muda a cada execução do CI). Para uma assinatura estável, crie os segredos do repositório
-`CONVERSOR_KEYSTORE_BASE64` (keystore em base64), `CONVERSOR_KEYSTORE_PASSWORD`, `CONVERSOR_KEY_ALIAS`
-e `CONVERSOR_KEY_PASSWORD`.
+Para que cada versão instale por cima da anterior, o APK precisa ser sempre assinado com a mesma chave.
+Configure em *Settings → Secrets and variables → Actions* do repositório:
+
+| Segredo | Conteúdo |
+|---|---|
+| `CONVERSOR_KEYSTORE_BASE64` | a keystore em base64 |
+| `CONVERSOR_KEYSTORE_PASSWORD` | senha da keystore |
+| `CONVERSOR_KEY_ALIAS` | alias da chave |
+| `CONVERSOR_KEY_PASSWORD` | senha da chave |
+
+A keystore e as senhas nunca devem ser colocadas no repositório (`*.jks` está no `.gitignore`). Guarde uma
+cópia de segurança: sem ela não é possível publicar atualizações. Sem os segredos, o CI assina com uma chave
+temporária de depuração e avisa isso nas notas da Release.
 
 ### Atualizar o código do MAME
 
@@ -196,8 +232,8 @@ tests/native/run_tests.sh <build-host>
   para o armazenamento do aparelho antes.
 - Ao cancelar uma conversão, a fila de trabalho do MAME deixa algumas dezenas de KB sem liberar até o
   processo terminar. É um comportamento do código original, que nunca é interrompido no meio pelo chdman.
-- A fila fica na memória: se o sistema encerrar o app, os itens precisam ser adicionados de novo.
-  O serviço em primeiro plano evita isso durante a conversão.
+- Um item interrompido (app encerrado à força) é refeito do início; não há retomada parcial.
+- Extração de CD para BIN/CUE omite o subcódigo, como o chdman (o formato `.cue` não o comporta).
 - Android 15+: serviços `dataSync` têm limite de 6 h por dia. Ao atingir o limite, a conversão é
   cancelada com segurança.
 

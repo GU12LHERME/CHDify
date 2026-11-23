@@ -69,6 +69,8 @@ class MainActivity : Activity(), JobCard.Actions {
     var onChdPicked: ((InputFile) -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // sai do tema de abertura (splash) para o tema normal antes de montar a interface
+        setTheme(R.style.Theme_CHDify)
         super.onCreate(savedInstanceState)
         prefs = Prefs(this)
         current = savedInstanceState?.getInt("aba") ?: 0
@@ -128,6 +130,10 @@ class MainActivity : Activity(), JobCard.Actions {
 
         val header = Ui.row(this, 10).apply {
             setPadding(pad, pad, pad, Ui.dp(this@MainActivity, 4))
+            addView(android.widget.ImageView(this@MainActivity).apply {
+                setImageResource(R.drawable.ic_notification)
+                contentDescription = null
+            }, LinearLayout.LayoutParams(Ui.dp(this@MainActivity, 26), Ui.dp(this@MainActivity, 26)))
             addView(Ui.text(this@MainActivity, getString(R.string.app_name), 20f, Ui.FG, bold = true))
             addView(Ui.text(this@MainActivity, getString(R.string.subtitle), 12f, Ui.SUBTLE).apply { Ui.singleLine(this, middle = false) }, Ui.weighted())
         }
