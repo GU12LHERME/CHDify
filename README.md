@@ -58,3 +58,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md), [BSD-3-Clause license](LICENSE) and [thi
 MAME is a trademark of Gregory Ember. This project is not affiliated with MAMEdev.
 
 For detailed features, compression benchmarks, controls and safety rules, see the [complete Portuguese documentation](README.pt-BR.md).
+
+
+## Help and security
+
+[FAQ](docs/FAQ.md) · [Troubleshooting / Solução de problemas](docs/TROUBLESHOOTING.md) · [Security / Segurança](SECURITY.md)
