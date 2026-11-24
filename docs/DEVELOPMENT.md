@@ -93,7 +93,7 @@ Requisitos: JDK 17, Android SDK 36, NDK 27.2.12479018, CMake 3.22.1.
 ```
 
 O workflow `.github/workflows/build.yml` roda tudo isso automaticamente e publica os APKs como artefato
-`CHDify-apk` e na Release `ultima-versao` (`CHDify-arm64-v8a.apk`), além dos logs de compilação e de testes.
+`CHDify-apk` e nas releases numeradas, publicadas somente por tag correspondente à versão e com assinatura configurada, além dos logs de compilação e de testes.
 
 ### Assinatura
 
