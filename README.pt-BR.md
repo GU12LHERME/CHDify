@@ -147,3 +147,8 @@ MAME é marca registrada de Gregory Ember. Este projeto não é afiliado ao MAME
 ## Publicação de versões
 
 Atualize a versão do aplicativo e as notas de atualização antes de criar uma tag numérica correspondente (por exemplo, `2.0.0`). O GitHub Actions gera o APK ARM64 assinado e publica a release com `SHA256SUMS.txt`. Releases existentes não são substituídas. Builds comuns ficam nos artefatos do Actions.
+
+
+## Ajuda e segurança
+
+[FAQ](docs/FAQ.md) · [Troubleshooting / Solução de problemas](docs/TROUBLESHOOTING.md) · [Security / Segurança](SECURITY.md)
