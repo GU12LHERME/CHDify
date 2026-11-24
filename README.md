@@ -8,7 +8,7 @@ Funciona offline, sem root, sem Termux e sem aplicativos adicionais.
 
 ## Download
 
-[Baixar APK na página de releases](https://github.com/GU12LHERME/CHDify/releases/tag/ultima-versao) · [GitHub Actions](https://github.com/GU12LHERME/CHDify/actions) · [Notas de atualização](RELEASE_NOTES.md)
+[Baixar APK na página de releases](https://github.com/GU12LHERME/CHDify/releases/latest) · [GitHub Actions](https://github.com/GU12LHERME/CHDify/actions) · [Notas de atualização](RELEASE_NOTES.md)
 
 ## Resumo
 
@@ -141,3 +141,7 @@ licenças estão em `THIRD_PARTY_NOTICES.md`. Todos os arquivos do MAME usados s
 domínio público, no caso de `md5.cpp`). Nenhum arquivo GPL do MAME é compilado.
 
 MAME é marca registrada de Gregory Ember. Este projeto não é afiliado ao MAMEdev.
+
+## Publicação de versões
+
+Atualize a versão do aplicativo e as notas de atualização antes de criar uma tag numérica correspondente (por exemplo, `2.0.0`). O GitHub Actions gera o APK ARM64 assinado e publica a release com `SHA256SUMS.txt`. Releases existentes não são substituídas. Builds comuns ficam nos artefatos do Actions.
